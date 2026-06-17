@@ -9,7 +9,8 @@ static int g_has_platform;
 static int g_has_renderer;
 static int g_initialized;
 
-void n64psp__queues_reset(void);
+n64psp_result n64psp__queues_init(void);
+n64psp_result n64psp__queues_shutdown(void);
 
 static int platform_valid(const n64psp_platform_callbacks *cb) {
     return cb && cb->log && cb->fatal && cb->monotonic_us && cb->sleep_us && cb->sem_create && cb->sem_wait &&
@@ -42,11 +43,17 @@ n64psp_result n64psp_runtime_register_renderer(const n64psp_renderer_callbacks *
 }
 
 n64psp_result n64psp_runtime_init(void) {
+    n64psp_result result;
+
     if (g_initialized) {
         return N64PSP_ERROR_ALREADY_INITIALIZED;
     }
     if (!g_has_platform || !g_has_renderer) {
         return N64PSP_ERROR_INVALID_STATE;
+    }
+    result = n64psp__queues_init();
+    if (result != N64PSP_OK) {
+        return result;
     }
     g_initialized = 1;
     n64psp_log("n64psp runtime initialized");
@@ -54,10 +61,15 @@ n64psp_result n64psp_runtime_init(void) {
 }
 
 n64psp_result n64psp_runtime_shutdown(void) {
+    n64psp_result result;
+
     if (!g_initialized) {
         return N64PSP_ERROR_NOT_INITIALIZED;
     }
-    n64psp__queues_reset();
+    result = n64psp__queues_shutdown();
+    if (result != N64PSP_OK) {
+        return result;
+    }
     g_initialized = 0;
     n64psp_log("n64psp runtime shut down");
     return N64PSP_OK;

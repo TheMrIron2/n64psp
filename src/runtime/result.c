@@ -26,6 +26,8 @@ const char *n64psp_result_name(n64psp_result result) {
         return "N64PSP_ERROR_UNSUPPORTED";
     case N64PSP_ERROR_PLATFORM:
         return "N64PSP_ERROR_PLATFORM";
+    case N64PSP_ERROR_BUSY:
+        return "N64PSP_ERROR_BUSY";
     default:
         return "N64PSP_ERROR_UNKNOWN";
     }

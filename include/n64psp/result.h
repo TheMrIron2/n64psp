@@ -18,6 +18,7 @@ typedef enum n64psp_result {
     N64PSP_ERROR_OUT_OF_RANGE = -9,
     N64PSP_ERROR_UNSUPPORTED = -10,
     N64PSP_ERROR_PLATFORM = -11,
+    N64PSP_ERROR_BUSY = -12,
 } n64psp_result;
 
 const char *n64psp_result_name(n64psp_result result);
