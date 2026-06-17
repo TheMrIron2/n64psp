@@ -16,3 +16,12 @@ N64ModernRuntime informed the split between a reusable runtime and a recompilati
 ## Tests
 
 Host tests do not require ROMs or proprietary data. PSP-specific behavior is compiled and tested by the PSP smoke app.
+
+## libultra compatibility
+
+The libultra-shaped queue entry points `osSendMesg`, `osJamMesg`, and
+`osRecvMesg` preserve libultra-visible return semantics: `0` on success and
+`-1` on any failure. Detailed `n64psp_result` values remain internal to that
+compatibility surface. If callers need native error reporting, expose it through
+separate `n64psp_*` APIs rather than leaking detailed runtime codes through the
+`os*` API.

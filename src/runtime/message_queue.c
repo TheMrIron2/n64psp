@@ -81,15 +81,21 @@ void osCreateMesgQueue(OSMesgQueue *mq, OSMesg *msg, int count) {
 static int send_common(OSMesgQueue *mq, OSMesg msg, int flag, int jam) {
     const n64psp_platform_callbacks *platform = n64psp__platform();
     queue_state *state = mq ? find_state(mq) : NULL;
+    n64psp_result lock_result;
+    n64psp_result post_result;
     if (!platform || !state || !mq->msg || mq->msgCount <= 0 || (flag != OS_MESG_BLOCK && flag != OS_MESG_NOBLOCK)) {
-        return N64PSP_ERROR_INVALID_ARGUMENT;
+        return -1;
     }
     n64psp_result wait_result = flag == OS_MESG_BLOCK ? platform->sem_wait(platform->userdata, state->slots)
                                                       : platform->sem_try_wait(platform->userdata, state->slots);
     if (wait_result != N64PSP_OK) {
-        return flag == OS_MESG_BLOCK ? (int)wait_result : N64PSP_ERROR_QUEUE_FULL;
+        return -1;
     }
-    platform->mutex_lock(platform->userdata, state->mutex);
+    lock_result = platform->mutex_lock(platform->userdata, state->mutex);
+    if (lock_result != N64PSP_OK) {
+        platform->sem_post(platform->userdata, state->slots);
+        return -1;
+    }
     if (jam) {
         mq->first = (mq->first + mq->msgCount - 1) % mq->msgCount;
         mq->msg[mq->first] = msg;
@@ -99,7 +105,10 @@ static int send_common(OSMesgQueue *mq, OSMesg msg, int flag, int jam) {
     }
     mq->validCount++;
     platform->mutex_unlock(platform->userdata, state->mutex);
-    platform->sem_post(platform->userdata, state->items);
+    post_result = platform->sem_post(platform->userdata, state->items);
+    if (post_result != N64PSP_OK) {
+        return -1;
+    }
     return 0;
 }
 
@@ -114,20 +123,29 @@ int osJamMesg(OSMesgQueue *mq, OSMesg msg, int flag) {
 int osRecvMesg(OSMesgQueue *mq, OSMesg *msg, int flag) {
     const n64psp_platform_callbacks *platform = n64psp__platform();
     queue_state *state = mq ? find_state(mq) : NULL;
+    n64psp_result lock_result;
+    n64psp_result post_result;
     if (!platform || !state || !mq->msg || mq->msgCount <= 0 || (flag != OS_MESG_BLOCK && flag != OS_MESG_NOBLOCK)) {
-        return N64PSP_ERROR_INVALID_ARGUMENT;
+        return -1;
     }
     n64psp_result wait_result = flag == OS_MESG_BLOCK ? platform->sem_wait(platform->userdata, state->items)
                                                       : platform->sem_try_wait(platform->userdata, state->items);
     if (wait_result != N64PSP_OK) {
-        return flag == OS_MESG_BLOCK ? (int)wait_result : N64PSP_ERROR_QUEUE_EMPTY;
+        return -1;
     }
-    platform->mutex_lock(platform->userdata, state->mutex);
+    lock_result = platform->mutex_lock(platform->userdata, state->mutex);
+    if (lock_result != N64PSP_OK) {
+        platform->sem_post(platform->userdata, state->items);
+        return -1;
+    }
     OSMesg value = mq->msg[mq->first];
     mq->first = (mq->first + 1) % mq->msgCount;
     mq->validCount--;
     platform->mutex_unlock(platform->userdata, state->mutex);
-    platform->sem_post(platform->userdata, state->slots);
+    post_result = platform->sem_post(platform->userdata, state->slots);
+    if (post_result != N64PSP_OK) {
+        return -1;
+    }
     if (msg) {
         *msg = value;
     }

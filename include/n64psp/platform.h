@@ -43,6 +43,31 @@ typedef struct n64psp_platform_callbacks {
 n64psp_result n64psp_platform_host_get_callbacks(n64psp_platform_callbacks *out_callbacks);
 n64psp_result n64psp_platform_psp_get_callbacks(n64psp_platform_callbacks *out_callbacks);
 
+#ifdef __PSP__
+typedef struct n64psp_platform_psp_diag {
+    int sem_create_raw;
+    int sem_wait_raw;
+    int sem_signal_raw;
+    int sem_delete_raw;
+    int mutex_create_raw;
+    int mutex_lock_raw;
+    int mutex_unlock_raw;
+    int mutex_delete_raw;
+    int thread_create_raw;
+    int thread_start_raw;
+    int thread_wait_raw;
+    int thread_delete_raw;
+    void *parent_thread_object;
+    void *parent_userdata;
+    void *child_thread_object;
+    void *child_userdata;
+} n64psp_platform_psp_diag;
+
+void n64psp_platform_psp_get_diag(n64psp_platform_psp_diag *out_diag);
+void *n64psp_platform_psp_thread_object(n64psp_platform_thread *thread);
+void *n64psp_platform_psp_sem_object(n64psp_platform_sem *sem);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

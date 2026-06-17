@@ -37,7 +37,27 @@ static int test_fifo_and_jam(void) {
     CHECK(osRecvMesg(&q, &out, OS_MESG_NOBLOCK) == 0 && out == 99);
     CHECK(osRecvMesg(&q, &out, OS_MESG_NOBLOCK) == 0 && out == 1);
     CHECK(osRecvMesg(&q, &out, OS_MESG_NOBLOCK) == 0 && out == 2);
-    CHECK(osRecvMesg(&q, &out, OS_MESG_NOBLOCK) == N64PSP_ERROR_QUEUE_EMPTY);
+    CHECK(osRecvMesg(&q, &out, OS_MESG_NOBLOCK) == -1);
+    return 0;
+}
+
+static int test_os_queue_return_contract(void) {
+    OSMesg storage[1];
+    OSMesgQueue q;
+    OSMesg out = 0;
+
+    osCreateMesgQueue(&q, storage, 1);
+    CHECK(osRecvMesg(&q, &out, OS_MESG_NOBLOCK) == -1);
+    CHECK(osSendMesg(&q, 1, OS_MESG_NOBLOCK) == 0);
+    CHECK(osSendMesg(&q, 2, OS_MESG_NOBLOCK) == -1);
+    CHECK(osJamMesg(&q, 3, OS_MESG_NOBLOCK) == -1);
+    CHECK(osRecvMesg(&q, &out, OS_MESG_NOBLOCK) == 0 && out == 1);
+    CHECK(osRecvMesg(NULL, &out, OS_MESG_NOBLOCK) == -1);
+    CHECK(osSendMesg(NULL, 1, OS_MESG_NOBLOCK) == -1);
+    CHECK(osJamMesg(NULL, 1, OS_MESG_NOBLOCK) == -1);
+    CHECK(osRecvMesg(&q, &out, 99) == -1);
+    CHECK(osSendMesg(&q, 1, 99) == -1);
+    CHECK(osJamMesg(&q, 1, 99) == -1);
     return 0;
 }
 
@@ -50,11 +70,11 @@ static int test_queue_reinit_and_shutdown(void) {
     CHECK(osSendMesg(&q, 1, OS_MESG_NOBLOCK) == 0);
     osCreateMesgQueue(&q, storage_b, 1);
     CHECK(q.validCount == 0 && q.msgCount == 1 && q.msg == storage_b);
-    CHECK(osRecvMesg(&q, &out, OS_MESG_NOBLOCK) == N64PSP_ERROR_QUEUE_EMPTY);
+    CHECK(osRecvMesg(&q, &out, OS_MESG_NOBLOCK) == -1);
     CHECK(osSendMesg(&q, 2, OS_MESG_NOBLOCK) == 0);
-    CHECK(osSendMesg(&q, 3, OS_MESG_NOBLOCK) == N64PSP_ERROR_QUEUE_FULL);
+    CHECK(osSendMesg(&q, 3, OS_MESG_NOBLOCK) == -1);
     CHECK(n64psp_runtime_shutdown() == N64PSP_OK);
-    CHECK(osSendMesg(&q, 4, OS_MESG_NOBLOCK) == N64PSP_ERROR_INVALID_ARGUMENT);
+    CHECK(osSendMesg(&q, 4, OS_MESG_NOBLOCK) == -1);
     return setup_runtime();
 }
 
@@ -65,7 +85,7 @@ static int test_full_and_wrap(void) {
     osCreateMesgQueue(&q, storage, 2);
     CHECK(osSendMesg(&q, 1, OS_MESG_NOBLOCK) == 0);
     CHECK(osSendMesg(&q, 2, OS_MESG_NOBLOCK) == 0);
-    CHECK(osSendMesg(&q, 3, OS_MESG_NOBLOCK) == N64PSP_ERROR_QUEUE_FULL);
+    CHECK(osSendMesg(&q, 3, OS_MESG_NOBLOCK) == -1);
     CHECK(osRecvMesg(&q, &out, OS_MESG_NOBLOCK) == 0 && out == 1);
     CHECK(osSendMesg(&q, 3, OS_MESG_NOBLOCK) == 0);
     CHECK(osRecvMesg(&q, &out, OS_MESG_NOBLOCK) == 0 && out == 2);
@@ -185,6 +205,7 @@ static int test_task(void) {
 int main(void) {
     CHECK(setup_runtime() == 0);
     CHECK(test_fifo_and_jam() == 0);
+    CHECK(test_os_queue_return_contract() == 0);
     CHECK(test_queue_reinit_and_shutdown() == 0);
     CHECK(test_full_and_wrap() == 0);
     CHECK(test_blocking_receive_and_send() == 0);

@@ -21,8 +21,22 @@ struct n64psp_platform_thread {
     SceUID id;
     n64psp_thread_entry entry;
     void *userdata;
+    struct n64psp_platform_thread *start_arg;
     int result;
 };
+
+static n64psp_platform_psp_diag g_psp_diag;
+
+static void psp_diag_reset_thread(n64psp_platform_thread *thread, void *userdata) {
+    g_psp_diag.thread_create_raw = 0;
+    g_psp_diag.thread_start_raw = 0;
+    g_psp_diag.thread_wait_raw = 0;
+    g_psp_diag.thread_delete_raw = 0;
+    g_psp_diag.parent_thread_object = thread;
+    g_psp_diag.parent_userdata = userdata;
+    g_psp_diag.child_thread_object = NULL;
+    g_psp_diag.child_userdata = NULL;
+}
 
 static void psp_log(void *userdata, const char *message) {
     (void)userdata;
@@ -64,6 +78,7 @@ static n64psp_result psp_sem_create(void *userdata, uint32_t initial, uint32_t m
         return N64PSP_ERROR_NO_MEMORY;
     }
     sem->id = sceKernelCreateSema("n64psp-sem", 0, (int)initial, (int)maximum, NULL);
+    g_psp_diag.sem_create_raw = sem->id;
     if (sem->id < 0) {
         free(sem);
         return N64PSP_ERROR_PLATFORM;
@@ -77,7 +92,8 @@ static n64psp_result psp_sem_wait(void *userdata, n64psp_platform_sem *sem) {
     if (!sem) {
         return N64PSP_ERROR_INVALID_ARGUMENT;
     }
-    return sceKernelWaitSema(sem->id, 1, NULL) < 0 ? N64PSP_ERROR_PLATFORM : N64PSP_OK;
+    g_psp_diag.sem_wait_raw = sceKernelWaitSema(sem->id, 1, NULL);
+    return g_psp_diag.sem_wait_raw < 0 ? N64PSP_ERROR_PLATFORM : N64PSP_OK;
 }
 
 static n64psp_result psp_sem_try_wait(void *userdata, n64psp_platform_sem *sem) {
@@ -85,8 +101,8 @@ static n64psp_result psp_sem_try_wait(void *userdata, n64psp_platform_sem *sem) 
     if (!sem) {
         return N64PSP_ERROR_INVALID_ARGUMENT;
     }
-    int result = sceKernelPollSema(sem->id, 1);
-    return result < 0 ? N64PSP_ERROR_TIMEOUT : N64PSP_OK;
+    g_psp_diag.sem_wait_raw = sceKernelPollSema(sem->id, 1);
+    return g_psp_diag.sem_wait_raw < 0 ? N64PSP_ERROR_TIMEOUT : N64PSP_OK;
 }
 
 static n64psp_result psp_sem_post(void *userdata, n64psp_platform_sem *sem) {
@@ -94,13 +110,14 @@ static n64psp_result psp_sem_post(void *userdata, n64psp_platform_sem *sem) {
     if (!sem) {
         return N64PSP_ERROR_INVALID_ARGUMENT;
     }
-    return sceKernelSignalSema(sem->id, 1) < 0 ? N64PSP_ERROR_PLATFORM : N64PSP_OK;
+    g_psp_diag.sem_signal_raw = sceKernelSignalSema(sem->id, 1);
+    return g_psp_diag.sem_signal_raw < 0 ? N64PSP_ERROR_PLATFORM : N64PSP_OK;
 }
 
 static void psp_sem_destroy(void *userdata, n64psp_platform_sem *sem) {
     (void)userdata;
     if (sem) {
-        sceKernelDeleteSema(sem->id);
+        g_psp_diag.sem_delete_raw = sceKernelDeleteSema(sem->id);
         free(sem);
     }
 }
@@ -115,6 +132,7 @@ static n64psp_result psp_mutex_create(void *userdata, n64psp_platform_mutex **ou
         return N64PSP_ERROR_NO_MEMORY;
     }
     mutex->id = sceKernelCreateSema("n64psp-mutex", 0, 1, 1, NULL);
+    g_psp_diag.mutex_create_raw = mutex->id;
     if (mutex->id < 0) {
         free(mutex);
         return N64PSP_ERROR_PLATFORM;
@@ -128,20 +146,21 @@ static n64psp_result psp_mutex_lock(void *userdata, n64psp_platform_mutex *mutex
     if (!mutex) {
         return N64PSP_ERROR_INVALID_ARGUMENT;
     }
-    return sceKernelWaitSema(mutex->id, 1, NULL) < 0 ? N64PSP_ERROR_PLATFORM : N64PSP_OK;
+    g_psp_diag.mutex_lock_raw = sceKernelWaitSema(mutex->id, 1, NULL);
+    return g_psp_diag.mutex_lock_raw < 0 ? N64PSP_ERROR_PLATFORM : N64PSP_OK;
 }
 
 static void psp_mutex_unlock(void *userdata, n64psp_platform_mutex *mutex) {
     (void)userdata;
     if (mutex) {
-        sceKernelSignalSema(mutex->id, 1);
+        g_psp_diag.mutex_unlock_raw = sceKernelSignalSema(mutex->id, 1);
     }
 }
 
 static void psp_mutex_destroy(void *userdata, n64psp_platform_mutex *mutex) {
     (void)userdata;
     if (mutex) {
-        sceKernelDeleteSema(mutex->id);
+        g_psp_diag.mutex_delete_raw = sceKernelDeleteSema(mutex->id);
         free(mutex);
     }
 }
@@ -152,6 +171,8 @@ static int psp_thread_main(SceSize args, void *argp) {
         return (int)N64PSP_ERROR_INVALID_ARGUMENT;
     }
     n64psp_platform_thread *thread = *(n64psp_platform_thread **)argp;
+    g_psp_diag.child_thread_object = thread;
+    g_psp_diag.child_userdata = thread ? thread->userdata : NULL;
     thread->result = thread->entry(thread->userdata);
     sceKernelExitThread(thread->result);
     return thread->result;
@@ -170,14 +191,18 @@ static n64psp_result psp_thread_create(void *userdata, const char *name, n64psp_
     }
     thread->entry = entry;
     thread->userdata = thread_userdata;
+    thread->start_arg = thread;
     thread->result = 0;
+    psp_diag_reset_thread(thread, thread_userdata);
     thread->id = sceKernelCreateThread(name ? name : "n64psp-thread", psp_thread_main, priority,
                                        stack_size ? (int)stack_size : 0x4000, 0, NULL);
+    g_psp_diag.thread_create_raw = thread->id;
     if (thread->id < 0) {
         free(thread);
         return N64PSP_ERROR_PLATFORM;
     }
-    if (sceKernelStartThread(thread->id, sizeof(thread), &thread) < 0) {
+    g_psp_diag.thread_start_raw = sceKernelStartThread(thread->id, sizeof(thread->start_arg), &thread->start_arg);
+    if (g_psp_diag.thread_start_raw < 0) {
         sceKernelDeleteThread(thread->id);
         free(thread);
         return N64PSP_ERROR_PLATFORM;
@@ -191,7 +216,8 @@ static n64psp_result psp_thread_join(void *userdata, n64psp_platform_thread *thr
     if (!thread) {
         return N64PSP_ERROR_INVALID_ARGUMENT;
     }
-    if (sceKernelWaitThreadEnd(thread->id, NULL) < 0) {
+    g_psp_diag.thread_wait_raw = sceKernelWaitThreadEnd(thread->id, NULL);
+    if (g_psp_diag.thread_wait_raw < 0) {
         return N64PSP_ERROR_PLATFORM;
     }
     if (out_code) {
@@ -203,9 +229,23 @@ static n64psp_result psp_thread_join(void *userdata, n64psp_platform_thread *thr
 static void psp_thread_destroy(void *userdata, n64psp_platform_thread *thread) {
     (void)userdata;
     if (thread) {
-        sceKernelDeleteThread(thread->id);
+        g_psp_diag.thread_delete_raw = sceKernelDeleteThread(thread->id);
         free(thread);
     }
+}
+
+void n64psp_platform_psp_get_diag(n64psp_platform_psp_diag *out_diag) {
+    if (out_diag) {
+        *out_diag = g_psp_diag;
+    }
+}
+
+void *n64psp_platform_psp_thread_object(n64psp_platform_thread *thread) {
+    return thread;
+}
+
+void *n64psp_platform_psp_sem_object(n64psp_platform_sem *sem) {
+    return sem;
 }
 
 n64psp_result n64psp_platform_psp_get_callbacks(n64psp_platform_callbacks *out_callbacks) {
