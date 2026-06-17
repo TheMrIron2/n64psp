@@ -1,0 +1,8 @@
+#ifndef N64PSP_CONFIG_H
+#define N64PSP_CONFIG_H
+
+#define N64PSP_VERSION_MAJOR 0
+#define N64PSP_VERSION_MINOR 1
+#define N64PSP_VERSION_PATCH 0
+
+#endif

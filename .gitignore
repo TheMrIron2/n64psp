@@ -1,0 +1,10 @@
+build-*/
+cmake-build-*/
+*.o
+*.a
+*.elf
+*.prx
+*.PBP
+PARAM.SFO
+.cache/
+scratch/

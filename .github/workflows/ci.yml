@@ -1,0 +1,23 @@
+name: host-ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler:
+          - { cc: gcc }
+          - { cc: clang }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select compiler
+        run: echo "HOST_CC=${{ matrix.compiler.cc }}" >> "$GITHUB_ENV"
+      - name: Test
+        run: make test
+
+# Future work: add a PSP cross-build job once a stable pspdev container or package
+# is selected for this project. The default workflow intentionally remains host-only.
