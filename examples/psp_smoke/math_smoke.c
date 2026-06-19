@@ -26,6 +26,7 @@ enum {
 static n64psp_vec4f math_batch_input[MATH_BATCH_MAX_COUNT];
 static n64psp_vec4f_pair math_batch_scalar[MATH_BATCH_MAX_COUNT];
 static n64psp_vec4f_pair math_batch_selected[MATH_BATCH_MAX_COUNT];
+static n64psp_vec4f_pair math_batch_independent[MATH_BATCH_MAX_COUNT];
 
 static uint32_t float_bits(float value) {
     uint32_t bits;
@@ -50,8 +51,8 @@ static n64psp_mat4f matrix_from_rows(const float rows[4][4]) {
     unsigned int row;
     unsigned int column;
 
-    for (row = 0; row < 4; ++row) {
-        for (column = 0; column < 4; ++column) {
+    for (row = 0; row < 4u; ++row) {
+        for (column = 0; column < 4u; ++column) {
             result.m[column][row] = rows[row][column];
         }
     }
@@ -89,10 +90,19 @@ static const char* component_name(unsigned int component) {
     return names[component];
 }
 
+static const char* selected_path_name(void) {
+#if N64PSP_USE_VFPU
+    return "VFPU";
+#else
+    return "scalar";
+#endif
+}
+
 static int compare_batch_output(
     const n64psp_vec4f_pair* scalar,
     const n64psp_vec4f_pair* selected,
-    unsigned int count
+    unsigned int count,
+    const char* operation
 ) {
     unsigned int index;
     unsigned int output_index;
@@ -122,15 +132,17 @@ static int compare_batch_output(
 
                 if (!nearly_equal(selected_value, scalar_value)) {
                     pspDebugScreenPrintf(
-                        "batch mismatch vector=%u output=%s component=%s\n",
+                        "%s mismatch vector=%u output=%s component=%s\n",
+                        operation,
                         index,
                         output_index == 0u ? "first" : "second",
                         component_name(component)
                     );
 
                     pspDebugScreenPrintf(
-                        " scalar=%g selected=%g absdiff=%g\n",
+                        " scalar=%g %s=%g absdiff=%g\n",
                         (double)scalar_value,
+                        selected_path_name(),
                         (double)selected_value,
                         (double)difference
                     );
@@ -149,7 +161,8 @@ static int compare_batch_against_single_transform(
     const n64psp_mat4f* first_matrix,
     const n64psp_mat4f* second_matrix,
     const n64psp_vec4f* input,
-    unsigned int count
+    unsigned int count,
+    int chained
 ) {
     unsigned int index;
     unsigned int output_index;
@@ -168,7 +181,7 @@ static int compare_batch_against_single_transform(
         n64psp_mat4f_transform_vec4_scalar(
             &expected_second,
             second_matrix,
-            &input[index]
+            chained ? &expected_first : &input[index]
         );
 
         for (output_index = 0; output_index < 2u; ++output_index) {
@@ -194,15 +207,15 @@ static int compare_batch_against_single_transform(
 
                 if (!nearly_equal(actual_value, expected_value)) {
                     pspDebugScreenPrintf(
-                        "single ref mismatch vector=%u "
-                        "output=%s component=%s\n",
+                        "%s single mismatch vector=%u output=%s component=%s\n",
+                        chained ? "chain2" : "independent",
                         index,
                         output_index == 0u ? "first" : "second",
                         component_name(component)
                     );
 
                     pspDebugScreenPrintf(
-                        " expected=%g actual=%g absdiff=%g\n",
+                        " scalar=%g batch=%g absdiff=%g\n",
                         (double)expected_value,
                         (double)actual_value,
                         (double)difference
@@ -240,16 +253,16 @@ static int run_batch_correctness_case(
     const n64psp_mat4f* first_matrix,
     const n64psp_mat4f* second_matrix
 ) {
-static const unsigned int counts[] = {
-    0u,
-    1u,
-    2u,
-    4u,
-    8u,
-    16u,
-    32u,
-    64u,
-};
+    static const unsigned int counts[] = {
+        0u,
+        1u,
+        2u,
+        4u,
+        8u,
+        16u,
+        32u,
+        64u,
+    };
 
     unsigned int count_index;
 
@@ -270,6 +283,22 @@ static const unsigned int counts[] = {
             );
 
             n64psp_mat4f_transform_vec4_2mat_batch(
+                NULL,
+                NULL,
+                NULL,
+                NULL,
+                0
+            );
+
+            n64psp_mat4f_transform_vec4_chain2_batch_scalar(
+                NULL,
+                NULL,
+                NULL,
+                NULL,
+                0
+            );
+
+            n64psp_mat4f_transform_vec4_chain2_batch(
                 NULL,
                 NULL,
                 NULL,
@@ -299,14 +328,14 @@ static const unsigned int counts[] = {
         if (!compare_batch_output(
                 math_batch_scalar,
                 math_batch_selected,
-                count
+                count,
+                "independent"
             )) {
             pspDebugScreenPrintf(
-                "batch case failed: %s count=%u\n",
+                "independent case failed: %s count=%u\n",
                 name,
                 count
             );
-
             return 1;
         }
 
@@ -315,23 +344,122 @@ static const unsigned int counts[] = {
                 first_matrix,
                 second_matrix,
                 math_batch_input,
-                count
+                count,
+                0
             )) {
             pspDebugScreenPrintf(
-                "batch single reference failed: %s count=%u\n",
+                "independent reference failed: %s count=%u\n",
                 name,
                 count
             );
+            return 1;
+        }
 
+        n64psp_mat4f_transform_vec4_chain2_batch_scalar(
+            math_batch_scalar,
+            first_matrix,
+            second_matrix,
+            math_batch_input,
+            count
+        );
+
+        n64psp_mat4f_transform_vec4_chain2_batch(
+            math_batch_selected,
+            first_matrix,
+            second_matrix,
+            math_batch_input,
+            count
+        );
+
+        if (!compare_batch_output(
+                math_batch_scalar,
+                math_batch_selected,
+                count,
+                "chain2"
+            )) {
+            pspDebugScreenPrintf(
+                "chain2 case failed: %s count=%u\n",
+                name,
+                count
+            );
+            return 1;
+        }
+
+        if (!compare_batch_against_single_transform(
+                math_batch_selected,
+                first_matrix,
+                second_matrix,
+                math_batch_input,
+                count,
+                1
+            )) {
+            pspDebugScreenPrintf(
+                "chain2 reference failed: %s count=%u\n",
+                name,
+                count
+            );
             return 1;
         }
     }
 
-    pspDebugScreenPrintf(
-        "math batch %s: PASS\n",
-        name
+    pspDebugScreenPrintf("math batches %s: PASS\n", name);
+    return 0;
+}
+
+static int run_chain_semantic_distinction(void) {
+    static const float scale_rows[4][4] = {
+        {2.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 3.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 4.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 1.0f},
+    };
+
+    static const float translation_rows[4][4] = {
+        {1.0f, 0.0f, 0.0f, 10.0f},
+        {0.0f, 1.0f, 0.0f, 20.0f},
+        {0.0f, 0.0f, 1.0f, 30.0f},
+        {0.0f, 0.0f, 0.0f, 1.0f},
+    };
+
+    const n64psp_mat4f scale = matrix_from_rows(scale_rows);
+    const n64psp_mat4f translation = matrix_from_rows(translation_rows);
+    const n64psp_vec4f input = {1.0f, 2.0f, 3.0f, 1.0f};
+    n64psp_vec4f_pair chained;
+    n64psp_vec4f_pair independent;
+
+    n64psp_mat4f_transform_vec4_chain2_batch(
+        &chained,
+        &scale,
+        &translation,
+        &input,
+        1
     );
 
+    n64psp_mat4f_transform_vec4_2mat_batch(
+        &independent,
+        &scale,
+        &translation,
+        &input,
+        1
+    );
+
+    if (!nearly_equal(chained.first.x, 2.0f) ||
+        !nearly_equal(chained.first.y, 6.0f) ||
+        !nearly_equal(chained.first.z, 12.0f) ||
+        !nearly_equal(chained.first.w, 1.0f) ||
+        !nearly_equal(chained.second.x, 12.0f) ||
+        !nearly_equal(chained.second.y, 26.0f) ||
+        !nearly_equal(chained.second.z, 42.0f) ||
+        !nearly_equal(chained.second.w, 1.0f) ||
+        !nearly_equal(independent.second.x, 11.0f) ||
+        !nearly_equal(independent.second.y, 22.0f) ||
+        !nearly_equal(independent.second.z, 33.0f) ||
+        !nearly_equal(independent.second.w, 1.0f)) {
+        pspDebugScreenPrintf("chain2 semantic distinction: FAIL\n");
+        return 1;
+    }
+
+    pspDebugScreenPrintf("chain2 semantic distinction: PASS\n");
     return 0;
 }
 
@@ -374,19 +502,17 @@ static int run_batch_correctness(void) {
         return 1;
     }
 
+    if (run_chain_semantic_distinction() != 0) {
+        return 1;
+    }
+
     pspDebugScreenPrintf(
         "math batch selected path: %s\n",
-#if N64PSP_USE_VFPU
-        "VFPU"
-#else
-        "scalar"
-#endif
+        selected_path_name()
     );
 
     return 0;
 }
-
-
 
 static int matrix_equal(
     const n64psp_mat4f* actual,
@@ -397,8 +523,8 @@ static int matrix_equal(
     unsigned int column;
     unsigned int row;
 
-    for (column = 0; column < 4; ++column) {
-        for (row = 0; row < 4; ++row) {
+    for (column = 0; column < 4u; ++column) {
+        for (row = 0; row < 4u; ++row) {
             const float actual_value = actual->m[column][row];
             const float expected_value = expected->m[column][row];
             const float difference =
@@ -461,56 +587,31 @@ static int run_math_correctness(void) {
     n64psp_mat4f_mul_scalar(&scalar, &a, &b);
     n64psp_mat4f_mul(&selected, &a, &b);
 
-    if (!matrix_equal(
-            &selected,
-            &scalar,
-            &max_difference
-        )) {
-        pspDebugScreenPrintf(
-            "math normal-output comparison failed\n"
-        );
+    if (!matrix_equal(&selected, &scalar, &max_difference)) {
+        pspDebugScreenPrintf("math normal-output comparison failed\n");
         return 1;
     }
 
     selected = a;
     n64psp_mat4f_mul(&selected, &selected, &b);
 
-    if (!matrix_equal(
-            &selected,
-            &scalar,
-            &max_difference
-        )) {
-        pspDebugScreenPrintf(
-            "math out==a comparison failed\n"
-        );
+    if (!matrix_equal(&selected, &scalar, &max_difference)) {
+        pspDebugScreenPrintf("math out==a comparison failed\n");
         return 1;
     }
 
     selected = b;
     n64psp_mat4f_mul(&selected, &a, &selected);
 
-    if (!matrix_equal(
-            &selected,
-            &scalar,
-            &max_difference
-        )) {
-        pspDebugScreenPrintf(
-            "math out==b comparison failed\n"
-        );
+    if (!matrix_equal(&selected, &scalar, &max_difference)) {
+        pspDebugScreenPrintf("math out==b comparison failed\n");
         return 1;
     }
 
-    pspDebugScreenPrintf(
-        "math mat4 multiply: PASS\n"
-    );
-
+    pspDebugScreenPrintf("math mat4 multiply: PASS\n");
     pspDebugScreenPrintf(
         "math selected path: %s\n",
-#if N64PSP_USE_VFPU
-        "VFPU"
-#else
-        "scalar"
-#endif
+        selected_path_name()
     );
 
     return 0;
@@ -518,46 +619,7 @@ static int run_math_correctness(void) {
 
 #if N64PSP_PSP_BENCHMARKS
 
-static void benchmark_warmup(
-    const n64psp_mat4f* a,
-    const n64psp_mat4f* b
-) {
-    n64psp_mat4f result;
-    int iteration;
-
-    for (iteration = 0; iteration < 64; ++iteration) {
-        n64psp_mat4f_mul_scalar(&result, a, b);
-        n64psp_mat4f_mul(&result, a, b);
-    }
-
-    math_benchmark_checksum +=
-        result.m[0][0] +
-        result.m[1][1] +
-        result.m[2][2] +
-        result.m[3][3];
-}
-
-static void print_benchmark_result(
-    const char* name,
-    uint64_t iterations,
-    n64psp_time_us elapsed
-) {
-    const uint64_t nanoseconds_per_operation =
-        elapsed != 0
-            ? ((uint64_t)elapsed * 1000ULL) / iterations
-            : 0;
-
-    pspDebugScreenPrintf(
-        "%s: %llu us, %llu ns/op\n",
-        name,
-        (unsigned long long)elapsed,
-        (unsigned long long)nanoseconds_per_operation
-    );
-}
-
-static uint32_t batch_benchmark_repetitions(
-    unsigned int count
-) {
+static uint32_t batch_benchmark_repetitions(unsigned int count) {
     const uint32_t target_vertices = 1048576u;
     uint32_t repetitions = target_vertices / (uint32_t)count;
 
@@ -568,14 +630,83 @@ static uint32_t batch_benchmark_repetitions(
     return repetitions;
 }
 
+static void consume_batch(
+    const n64psp_vec4f_pair* output,
+    unsigned int count
+) {
+    math_benchmark_checksum +=
+        output[count - 1u].first.x +
+        output[count - 1u].second.w;
+}
+
+static uint64_t nanoseconds_per_batch(
+    n64psp_time_us elapsed,
+    uint32_t repetitions
+) {
+    return
+        ((uint64_t)elapsed * 1000ULL) /
+        (uint64_t)repetitions;
+}
+
+static uint64_t nanoseconds_per_vertex(
+    n64psp_time_us elapsed,
+    uint32_t repetitions,
+    unsigned int count
+) {
+    return
+        ((uint64_t)elapsed * 1000ULL) /
+        ((uint64_t)repetitions * (uint64_t)count);
+}
+
+static void print_batch_measurement(
+    const char* name,
+    n64psp_time_us elapsed,
+    uint32_t repetitions,
+    unsigned int count
+) {
+    pspDebugScreenPrintf(
+        " %-18s total=%llu us batch=%llu ns vertex=%llu ns\n",
+        name,
+        (unsigned long long)elapsed,
+        (unsigned long long)nanoseconds_per_batch(elapsed, repetitions),
+        (unsigned long long)nanoseconds_per_vertex(
+            elapsed,
+            repetitions,
+            count
+        )
+    );
+}
+
+static void print_ratio(
+    const char* name,
+    n64psp_time_us numerator,
+    n64psp_time_us denominator
+) {
+    uint64_t thousandths = 0ULL;
+
+    if (denominator != 0) {
+        thousandths =
+            ((uint64_t)numerator * 1000ULL) /
+            (uint64_t)denominator;
+    }
+
+    pspDebugScreenPrintf(
+        " %-18s %llu.%03llux\n",
+        name,
+        (unsigned long long)(thousandths / 1000ULL),
+        (unsigned long long)(thousandths % 1000ULL)
+    );
+}
+
 static void batch_benchmark_warmup(
     const n64psp_mat4f* first_matrix,
     const n64psp_mat4f* second_matrix
 ) {
+    n64psp_mat4f combined;
     unsigned int iteration;
 
     for (iteration = 0; iteration < 64u; ++iteration) {
-        n64psp_mat4f_transform_vec4_2mat_batch_scalar(
+        n64psp_mat4f_transform_vec4_chain2_batch_scalar(
             math_batch_scalar,
             first_matrix,
             second_matrix,
@@ -583,79 +714,36 @@ static void batch_benchmark_warmup(
             MATH_BATCH_MAX_COUNT
         );
 
-        n64psp_mat4f_transform_vec4_2mat_batch(
+        n64psp_mat4f_transform_vec4_chain2_batch(
             math_batch_selected,
             first_matrix,
             second_matrix,
             math_batch_input,
             MATH_BATCH_MAX_COUNT
         );
+
+        n64psp_mat4f_transform_vec4_2mat_batch(
+            math_batch_independent,
+            first_matrix,
+            second_matrix,
+            math_batch_input,
+            MATH_BATCH_MAX_COUNT
+        );
+
+        n64psp_mat4f_mul(&combined, second_matrix, first_matrix);
+
+        n64psp_mat4f_transform_vec4_2mat_batch(
+            math_batch_independent,
+            first_matrix,
+            &combined,
+            math_batch_input,
+            MATH_BATCH_MAX_COUNT
+        );
     }
 
-    math_benchmark_checksum +=
-        math_batch_scalar[MATH_BATCH_MAX_COUNT - 1].first.x +
-        math_batch_selected[MATH_BATCH_MAX_COUNT - 1].second.w;
-}
-
-static void print_batch_benchmark_result(
-    unsigned int count,
-    uint32_t repetitions,
-    n64psp_time_us scalar_elapsed,
-    n64psp_time_us selected_elapsed
-) {
-    const uint64_t scalar_ns =
-        (uint64_t)scalar_elapsed * 1000ULL;
-
-    const uint64_t selected_ns =
-        (uint64_t)selected_elapsed * 1000ULL;
-
-    const uint64_t total_vertices =
-        (uint64_t)repetitions * (uint64_t)count;
-
-    const uint64_t scalar_ns_per_batch =
-        scalar_ns / (uint64_t)repetitions;
-
-    const uint64_t selected_ns_per_batch =
-        selected_ns / (uint64_t)repetitions;
-
-    const uint64_t scalar_ns_per_vertex =
-        scalar_ns / total_vertices;
-
-    const uint64_t selected_ns_per_vertex =
-        selected_ns / total_vertices;
-
-    uint64_t speedup_thousandths = 0ULL;
-
-    if (selected_ns != 0ULL) {
-        speedup_thousandths =
-            (scalar_ns * 1000ULL) / selected_ns;
-    }
-
-    pspDebugScreenPrintf(
-        "batch count=%u reps=%lu\n",
-        count,
-        (unsigned long)repetitions
-    );
-
-    pspDebugScreenPrintf(
-        " scalar total=%llu us batch=%llu ns vertex=%llu ns\n",
-        (unsigned long long)scalar_elapsed,
-        (unsigned long long)scalar_ns_per_batch,
-        (unsigned long long)scalar_ns_per_vertex
-    );
-
-    pspDebugScreenPrintf(
-        " selected total=%llu us batch=%llu ns vertex=%llu ns\n",
-        (unsigned long long)selected_elapsed,
-        (unsigned long long)selected_ns_per_batch,
-        (unsigned long long)selected_ns_per_vertex
-    );
-
-    pspDebugScreenPrintf(
-        " speed=%llu.%03llux\n",
-        (unsigned long long)(speedup_thousandths / 1000ULL),
-        (unsigned long long)(speedup_thousandths % 1000ULL)
-    );
+    consume_batch(math_batch_scalar, MATH_BATCH_MAX_COUNT);
+    consume_batch(math_batch_selected, MATH_BATCH_MAX_COUNT);
+    consume_batch(math_batch_independent, MATH_BATCH_MAX_COUNT);
 }
 
 static int run_batch_benchmark(void) {
@@ -691,10 +779,11 @@ static int run_batch_benchmark(void) {
     unsigned int count_index;
 
     initialize_batch_input();
+    batch_benchmark_warmup(&first_matrix, &second_matrix);
 
-    batch_benchmark_warmup(
-        &first_matrix,
-        &second_matrix
+    pspDebugScreenPrintf(
+        "chain2 benchmark selected=%s\n",
+        selected_path_name()
     );
 
     for (
@@ -703,21 +792,23 @@ static int run_batch_benchmark(void) {
         ++count_index
     ) {
         const unsigned int count = counts[count_index];
-
         const uint32_t repetitions =
             batch_benchmark_repetitions(count);
 
         n64psp_time_us scalar_start;
         n64psp_time_us scalar_end;
-        n64psp_time_us selected_start;
-        n64psp_time_us selected_end;
-
+        n64psp_time_us chain_start;
+        n64psp_time_us chain_end;
+        n64psp_time_us independent_start;
+        n64psp_time_us independent_end;
+        n64psp_time_us compound_start;
+        n64psp_time_us compound_end;
         uint32_t iteration;
 
         scalar_start = n64psp_time_monotonic_us();
 
         for (iteration = 0; iteration < repetitions; ++iteration) {
-            n64psp_mat4f_transform_vec4_2mat_batch_scalar(
+            n64psp_mat4f_transform_vec4_chain2_batch_scalar(
                 math_batch_scalar,
                 &first_matrix,
                 &second_matrix,
@@ -727,15 +818,12 @@ static int run_batch_benchmark(void) {
         }
 
         scalar_end = n64psp_time_monotonic_us();
+        consume_batch(math_batch_scalar, count);
 
-        math_benchmark_checksum +=
-            math_batch_scalar[count - 1u].first.x +
-            math_batch_scalar[count - 1u].second.w;
-
-        selected_start = n64psp_time_monotonic_us();
+        chain_start = n64psp_time_monotonic_us();
 
         for (iteration = 0; iteration < repetitions; ++iteration) {
-            n64psp_mat4f_transform_vec4_2mat_batch(
+            n64psp_mat4f_transform_vec4_chain2_batch(
                 math_batch_selected,
                 &first_matrix,
                 &second_matrix,
@@ -744,21 +832,138 @@ static int run_batch_benchmark(void) {
             );
         }
 
-        selected_end = n64psp_time_monotonic_us();
+        chain_end = n64psp_time_monotonic_us();
+        consume_batch(math_batch_selected, count);
 
-        math_benchmark_checksum +=
-            math_batch_selected[count - 1u].first.x +
-            math_batch_selected[count - 1u].second.w;
+        independent_start = n64psp_time_monotonic_us();
 
-        print_batch_benchmark_result(
+        for (iteration = 0; iteration < repetitions; ++iteration) {
+            n64psp_mat4f_transform_vec4_2mat_batch(
+                math_batch_independent,
+                &first_matrix,
+                &second_matrix,
+                math_batch_input,
+                count
+            );
+        }
+
+        independent_end = n64psp_time_monotonic_us();
+        consume_batch(math_batch_independent, count);
+
+        compound_start = n64psp_time_monotonic_us();
+
+        for (iteration = 0; iteration < repetitions; ++iteration) {
+            n64psp_mat4f combined;
+
+            n64psp_mat4f_mul(
+                &combined,
+                &second_matrix,
+                &first_matrix
+            );
+
+            n64psp_mat4f_transform_vec4_2mat_batch(
+                math_batch_independent,
+                &first_matrix,
+                &combined,
+                math_batch_input,
+                count
+            );
+        }
+
+        compound_end = n64psp_time_monotonic_us();
+        consume_batch(math_batch_independent, count);
+
+        pspDebugScreenPrintf(
+            "batch count=%u reps=%lu\n",
             count,
-            repetitions,
+            (unsigned long)repetitions
+        );
+
+        print_batch_measurement(
+            "chain scalar",
             scalar_end - scalar_start,
-            selected_end - selected_start
+            repetitions,
+            count
+        );
+
+        print_batch_measurement(
+            "chain selected",
+            chain_end - chain_start,
+            repetitions,
+            count
+        );
+
+        print_batch_measurement(
+            "independent selected",
+            independent_end - independent_start,
+            repetitions,
+            count
+        );
+
+        print_batch_measurement(
+            "precompose+indep",
+            compound_end - compound_start,
+            repetitions,
+            count
+        );
+
+        print_ratio(
+            "scalar/chain",
+            scalar_end - scalar_start,
+            chain_end - chain_start
+        );
+
+        print_ratio(
+            "indep/chain",
+            independent_end - independent_start,
+            chain_end - chain_start
+        );
+
+        print_ratio(
+            "compound/chain",
+            compound_end - compound_start,
+            chain_end - chain_start
         );
     }
 
     return 0;
+}
+
+static void benchmark_warmup(
+    const n64psp_mat4f* a,
+    const n64psp_mat4f* b
+) {
+    n64psp_mat4f result;
+    int iteration;
+
+    for (iteration = 0; iteration < 64; ++iteration) {
+        n64psp_mat4f_mul_scalar(&result, a, b);
+        n64psp_mat4f_mul(&result, a, b);
+    }
+
+    math_benchmark_checksum +=
+        result.m[0][0] +
+        result.m[1][1] +
+        result.m[2][2] +
+        result.m[3][3];
+}
+
+static void print_benchmark_result(
+    const char* name,
+    uint64_t iterations,
+    n64psp_time_us elapsed
+) {
+    const uint64_t nanoseconds_per_operation =
+        elapsed != 0
+            ? ((uint64_t)elapsed * 1000ULL) / iterations
+            : 0ULL;
+
+    pspDebugScreenPrintf(
+        "%s: %llu us, %llu ns/op\n",
+        name,
+        (unsigned long long)elapsed,
+        (unsigned long long)nanoseconds_per_operation
+    );
 }
 
 static int run_math_benchmark(void) {
@@ -782,14 +987,12 @@ static int run_math_benchmark(void) {
 
     const n64psp_mat4f a = matrix_from_rows(a_rows);
     const n64psp_mat4f b = matrix_from_rows(b_rows);
-
     n64psp_mat4f result;
     n64psp_time_us scalar_start;
     n64psp_time_us scalar_end;
     n64psp_time_us selected_start;
     n64psp_time_us selected_end;
-
-    uint64_t speedup_thousandths = 0;
+    uint64_t speedup_thousandths = 0ULL;
     int iteration;
 
     benchmark_warmup(&a, &b);
