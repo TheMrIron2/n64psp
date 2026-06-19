@@ -24,6 +24,11 @@ typedef struct N64PSP_ALIGN16 n64psp_mat4f {
     float m[4][4];
 } n64psp_mat4f;
 
+typedef struct N64PSP_ALIGN16 n64psp_vec4f_pair {
+    n64psp_vec4f first;
+    n64psp_vec4f second;
+} n64psp_vec4f_pair;
+
 /*
  * Matrix storage convention
  * -------------------------
@@ -66,6 +71,14 @@ void n64psp_mat4f_transform_vec4(
     n64psp_vec4f* out,
     const n64psp_mat4f* matrix,
     const n64psp_vec4f* vector
+);
+
+void n64psp_mat4f_transform_vec4_2mat_batch(
+    n64psp_vec4f_pair* output,
+    const n64psp_mat4f* first_matrix,
+    const n64psp_mat4f* second_matrix,
+    const n64psp_vec4f* input,
+    size_t count
 );
 
 #ifdef __cplusplus
