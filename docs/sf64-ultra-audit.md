@@ -84,4 +84,13 @@ The useful cross-port conclusion is narrow: queues and time/count wrappers are c
 
 High-frequency event coalescing, including VI retrace coalescing, is an SF64/platform-adapter responsibility rather than generic queue behavior. Full-game and long-duration PSP validation remain pending.
 
+The optimized queue hot path has also been measured on physical PSP hardware:
+the standalone uncontended benchmark reached roughly 1.2-1.4 million queue
+operations per second, the capacity-one two-thread ping-pong reached roughly
+115,000 queue operations per second, and SF64 title-screen aggregate counters
+showed matched blocking wake/retry traffic with no spurious wake-ups. PPSSPP
+currently remains much slower with the same EBOOT and healthy counters, so that
+is tracked as an emulator-specific scheduling/timing discrepancy rather than a
+proven queue-runtime defect.
+
 Everything else needs either a new n64psp runtime subsystem, a bridge/platform callback, or an SF64-specific integration adapter.

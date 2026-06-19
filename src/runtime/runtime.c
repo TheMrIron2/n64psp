@@ -15,7 +15,8 @@ n64psp_result n64psp__queues_shutdown(void);
 static int platform_valid(const n64psp_platform_callbacks *cb) {
     return cb && cb->log && cb->fatal && cb->monotonic_us && cb->sleep_us && cb->sem_create && cb->sem_wait &&
            cb->sem_try_wait && cb->sem_post && cb->sem_destroy && cb->mutex_create && cb->mutex_lock &&
-           cb->mutex_unlock && cb->mutex_destroy && cb->thread_create && cb->thread_join && cb->thread_destroy;
+           cb->mutex_unlock && cb->mutex_destroy && cb->critical_create && cb->critical_enter && cb->critical_leave &&
+           cb->critical_destroy && cb->thread_create && cb->thread_join && cb->thread_destroy;
 }
 
 n64psp_result n64psp_runtime_register_platform(const n64psp_platform_callbacks *callbacks) {

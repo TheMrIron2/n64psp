@@ -43,6 +43,112 @@ static int psp_send_thread(void *userdata) {
     return osSendMesg(tc->queue, tc->value, OS_MESG_BLOCK);
 }
 
+#if N64PSP_PSP_BENCHMARKS
+typedef struct psp_pingpong_case {
+    OSMesgQueue *request_queue;
+    OSMesgQueue *ack_queue;
+    int round_trips;
+} psp_pingpong_case;
+
+static void print_psp_queue_benchmark(const char *name, uint64_t ops, n64psp_time_us elapsed) {
+    uint64_t ops_per_sec = elapsed ? (ops * 1000000ULL) / elapsed : 0;
+
+    pspDebugScreenPrintf("%s: ops=%llu elapsed_us=%llu ops/s=%llu\n", name, (unsigned long long)ops,
+                         (unsigned long long)elapsed, (unsigned long long)ops_per_sec);
+}
+
+static int run_psp_queue_benchmark(void) {
+    enum { PAIRS = 100000 };
+    OSMesg storage[16];
+    OSMesgQueue queue;
+    OSMesg msg = 0;
+    n64psp_time_us start;
+    n64psp_time_us end;
+    int i;
+
+    osCreateMesgQueue(&queue, storage, 1);
+    start = n64psp_time_monotonic_us();
+    for (i = 0; i < PAIRS; i++) {
+        if (osSendMesg(&queue, (OSMesg)i, OS_MESG_NOBLOCK) != 0 ||
+            osRecvMesg(&queue, &msg, OS_MESG_NOBLOCK) != 0 || msg != (OSMesg)i) {
+            return 1;
+        }
+    }
+    end = n64psp_time_monotonic_us();
+    print_psp_queue_benchmark("queue bench cap=1", (uint64_t)PAIRS * 2ULL, end - start);
+
+    osCreateMesgQueue(&queue, storage, 16);
+    start = n64psp_time_monotonic_us();
+    for (i = 0; i < PAIRS; i++) {
+        if (osSendMesg(&queue, (OSMesg)i, OS_MESG_NOBLOCK) != 0 ||
+            osRecvMesg(&queue, &msg, OS_MESG_NOBLOCK) != 0 || msg != (OSMesg)i) {
+            return 1;
+        }
+    }
+    end = n64psp_time_monotonic_us();
+    print_psp_queue_benchmark("queue bench cap=16", (uint64_t)PAIRS * 2ULL, end - start);
+    return 0;
+}
+
+static int psp_pingpong_thread(void *userdata) {
+    psp_pingpong_case *pc = (psp_pingpong_case *)userdata;
+    int i;
+
+    for (i = 0; i < pc->round_trips; i++) {
+        OSMesg msg = 0;
+        if (osRecvMesg(pc->request_queue, &msg, OS_MESG_BLOCK) != 0 ||
+            osSendMesg(pc->ack_queue, msg, OS_MESG_BLOCK) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int run_psp_pingpong_benchmark(const n64psp_platform_callbacks *platform) {
+    enum { ROUND_TRIPS = 20000 };
+    OSMesg request_storage[1];
+    OSMesg ack_storage[1];
+    OSMesgQueue request_queue;
+    OSMesgQueue ack_queue;
+    psp_pingpong_case pc;
+    n64psp_platform_thread *thread = NULL;
+    n64psp_time_us start;
+    n64psp_time_us end;
+    int code = -1;
+    int i;
+
+    osCreateMesgQueue(&request_queue, request_storage, 1);
+    osCreateMesgQueue(&ack_queue, ack_storage, 1);
+    pc.request_queue = &request_queue;
+    pc.ack_queue = &ack_queue;
+    pc.round_trips = ROUND_TRIPS;
+    if (platform->thread_create(platform->userdata, "n64psp-pingpong", psp_pingpong_thread, &pc, 0x4000, 0x20,
+                                &thread) != N64PSP_OK) {
+        return 1;
+    }
+    n64psp_queue_reset_counters();
+    start = n64psp_time_monotonic_us();
+    for (i = 0; i < ROUND_TRIPS; i++) {
+        OSMesg ack = 0;
+        if (osSendMesg(&request_queue, (OSMesg)i, OS_MESG_BLOCK) != 0 ||
+            osRecvMesg(&ack_queue, &ack, OS_MESG_BLOCK) != 0 || ack != (OSMesg)i) {
+            return 1;
+        }
+    }
+    if (platform->thread_join(platform->userdata, thread, &code) != N64PSP_OK || code != 0) {
+        return 1;
+    }
+    platform->thread_destroy(platform->userdata, thread);
+    end = n64psp_time_monotonic_us();
+    print_psp_queue_benchmark("queue pingpong cap=1 two-thread roundtrip", (uint64_t)ROUND_TRIPS * 4ULL,
+                              end - start);
+    pspDebugScreenPrintf("queue pingpong round_trips=%d producer_to_consumer=request consumer_to_producer=ack\n",
+                         ROUND_TRIPS);
+    n64psp_queue_dump_counters("psp_pingpong");
+    return 0;
+}
+#endif
+
 int main(void) {
     pspDebugScreenInit();
     setup_callbacks();
@@ -102,6 +208,18 @@ int main(void) {
         sceKernelExitGame();
         return 5;
     }
+#if N64PSP_PSP_BENCHMARKS
+    if (run_psp_queue_benchmark() != 0) {
+        pspDebugScreenPrintf("queue benchmark failed\n");
+        sceKernelExitGame();
+        return 6;
+    }
+    if (run_psp_pingpong_benchmark(&platform) != 0) {
+        pspDebugScreenPrintf("queue pingpong benchmark failed\n");
+        sceKernelExitGame();
+        return 7;
+    }
+#endif
     n64psp_runtime_shutdown();
     pspDebugScreenPrintf("n64psp PSP smoke passed\n");
     sceDisplayWaitVblankStart();

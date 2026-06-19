@@ -133,6 +133,26 @@ static void fault_mutex_destroy(void *userdata, n64psp_platform_mutex *mutex) {
     fp->base.mutex_destroy(fp->base.userdata, mutex);
 }
 
+static n64psp_result fault_critical_create(void *userdata, n64psp_platform_critical **out_critical) {
+    fault_platform *fp = (fault_platform *)userdata;
+    return fp->base.critical_create(fp->base.userdata, out_critical);
+}
+
+static n64psp_result fault_critical_enter(void *userdata, n64psp_platform_critical *critical, uintptr_t *out_state) {
+    fault_platform *fp = (fault_platform *)userdata;
+    return fp->base.critical_enter(fp->base.userdata, critical, out_state);
+}
+
+static void fault_critical_leave(void *userdata, n64psp_platform_critical *critical, uintptr_t state) {
+    fault_platform *fp = (fault_platform *)userdata;
+    fp->base.critical_leave(fp->base.userdata, critical, state);
+}
+
+static void fault_critical_destroy(void *userdata, n64psp_platform_critical *critical) {
+    fault_platform *fp = (fault_platform *)userdata;
+    fp->base.critical_destroy(fp->base.userdata, critical);
+}
+
 static n64psp_result fault_thread_create(void *userdata, const char *name, n64psp_thread_entry entry,
                                          void *thread_userdata, uint32_t stack_size, int priority,
                                          n64psp_platform_thread **out_thread) {
@@ -167,6 +187,10 @@ static int make_fault_platform(fault_platform *fp, n64psp_platform_callbacks *ca
     callbacks->mutex_lock = fault_mutex_lock;
     callbacks->mutex_unlock = fault_mutex_unlock;
     callbacks->mutex_destroy = fault_mutex_destroy;
+    callbacks->critical_create = fault_critical_create;
+    callbacks->critical_enter = fault_critical_enter;
+    callbacks->critical_leave = fault_critical_leave;
+    callbacks->critical_destroy = fault_critical_destroy;
     callbacks->thread_create = fault_thread_create;
     callbacks->thread_join = fault_thread_join;
     callbacks->thread_destroy = fault_thread_destroy;
@@ -562,7 +586,132 @@ static int test_concurrent_create_and_lookup(void) {
     return 0;
 }
 
-static int test_post_failure_rollbacks(void) {
+static int test_multiple_blocked_senders_and_receivers(void) {
+    fault_platform fp;
+    n64psp_platform_callbacks callbacks;
+    OSMesg storage[1];
+    OSMesgQueue q;
+    n64psp_platform_thread *threads[2] = {0};
+    thread_case cases[2];
+    OSMesg out_a = 0;
+    OSMesg out_b = 0;
+    int code = -1;
+
+    CHECK(make_fault_platform(&fp, &callbacks) == 0);
+    CHECK(reset_runtime_with(&callbacks) == 0);
+    CHECK(fp.base.sem_create(fp.base.userdata, 0, 16, &fp.sem_wait_hook) == N64PSP_OK);
+
+    osCreateMesgQueue(&q, storage, 1);
+    CHECK(osSendMesg(&q, 1, OS_MESG_NOBLOCK) == 0);
+    cases[0].q = &q;
+    cases[0].value = 2;
+    cases[1].q = &q;
+    cases[1].value = 3;
+    CHECK(callbacks.thread_create(callbacks.userdata, "send-a", send_thread, &cases[0], 0, 0, &threads[0]) ==
+          N64PSP_OK);
+    CHECK(callbacks.thread_create(callbacks.userdata, "send-b", send_thread, &cases[1], 0, 0, &threads[1]) ==
+          N64PSP_OK);
+    CHECK(wait_for_hook(&fp) == 0);
+    CHECK(wait_for_hook(&fp) == 0);
+    CHECK(osRecvMesg(&q, &out_a, OS_MESG_BLOCK) == 0 && out_a == 1);
+    CHECK(osRecvMesg(&q, &out_a, OS_MESG_BLOCK) == 0);
+    CHECK(osRecvMesg(&q, &out_b, OS_MESG_BLOCK) == 0);
+    CHECK(out_a + out_b == 5);
+    CHECK(callbacks.thread_join(callbacks.userdata, threads[0], &code) == N64PSP_OK);
+    callbacks.thread_destroy(callbacks.userdata, threads[0]);
+    CHECK(code == 0);
+    CHECK(callbacks.thread_join(callbacks.userdata, threads[1], &code) == N64PSP_OK);
+    callbacks.thread_destroy(callbacks.userdata, threads[1]);
+    CHECK(code == 0);
+
+    cases[0].value = 0;
+    cases[1].value = 0;
+    CHECK(callbacks.thread_create(callbacks.userdata, "recv-a", recv_thread, &cases[0], 0, 0, &threads[0]) ==
+          N64PSP_OK);
+    CHECK(callbacks.thread_create(callbacks.userdata, "recv-b", recv_thread, &cases[1], 0, 0, &threads[1]) ==
+          N64PSP_OK);
+    CHECK(wait_for_hook(&fp) == 0);
+    CHECK(wait_for_hook(&fp) == 0);
+    CHECK(osSendMesg(&q, 10, OS_MESG_BLOCK) == 0);
+    CHECK(osSendMesg(&q, 20, OS_MESG_BLOCK) == 0);
+    CHECK(callbacks.thread_join(callbacks.userdata, threads[0], &code) == N64PSP_OK);
+    callbacks.thread_destroy(callbacks.userdata, threads[0]);
+    CHECK(code == 0);
+    CHECK(callbacks.thread_join(callbacks.userdata, threads[1], &code) == N64PSP_OK);
+    callbacks.thread_destroy(callbacks.userdata, threads[1]);
+    CHECK(code == 0);
+    CHECK(cases[0].value + cases[1].value == 30);
+
+    fp.base.sem_destroy(fp.base.userdata, fp.sem_wait_hook);
+    fp.sem_wait_hook = NULL;
+    CHECK(reset_runtime_with(NULL) == 0);
+    return 0;
+}
+
+static int test_no_stale_wake_token_after_drain(void) {
+    fault_platform fp;
+    n64psp_platform_callbacks callbacks;
+    OSMesg storage[1];
+    OSMesgQueue q;
+    n64psp_platform_thread *thread = NULL;
+    thread_case tc;
+    OSMesg out = 0;
+    int code = -1;
+
+    CHECK(make_fault_platform(&fp, &callbacks) == 0);
+    CHECK(reset_runtime_with(&callbacks) == 0);
+    CHECK(fp.base.sem_create(fp.base.userdata, 0, 16, &fp.sem_wait_hook) == N64PSP_OK);
+    osCreateMesgQueue(&q, storage, 1);
+    tc.q = &q;
+    tc.value = 0;
+    CHECK(callbacks.thread_create(callbacks.userdata, "recv", recv_thread, &tc, 0, 0, &thread) == N64PSP_OK);
+    CHECK(wait_for_hook(&fp) == 0);
+    CHECK(osSendMesg(&q, 77, OS_MESG_NOBLOCK) == 0);
+    CHECK(callbacks.thread_join(callbacks.userdata, thread, &code) == N64PSP_OK);
+    callbacks.thread_destroy(callbacks.userdata, thread);
+    CHECK(code == 0 && tc.value == 77);
+    CHECK(osRecvMesg(&q, &out, OS_MESG_NOBLOCK) == -1);
+    CHECK(osSendMesg(&q, 88, OS_MESG_NOBLOCK) == 0);
+    CHECK(osRecvMesg(&q, &out, OS_MESG_NOBLOCK) == 0 && out == 88);
+    fp.base.sem_destroy(fp.base.userdata, fp.sem_wait_hook);
+    fp.sem_wait_hook = NULL;
+    CHECK(reset_runtime_with(NULL) == 0);
+    return 0;
+}
+
+static int test_jam_contention_after_wraparound(void) {
+    fault_platform fp;
+    n64psp_platform_callbacks callbacks;
+    OSMesg storage[2];
+    OSMesgQueue q;
+    n64psp_platform_thread *thread = NULL;
+    thread_case tc;
+    OSMesg out = 0;
+    int code = -1;
+
+    CHECK(make_fault_platform(&fp, &callbacks) == 0);
+    CHECK(reset_runtime_with(&callbacks) == 0);
+    CHECK(fp.base.sem_create(fp.base.userdata, 0, 16, &fp.sem_wait_hook) == N64PSP_OK);
+    osCreateMesgQueue(&q, storage, 2);
+    CHECK(osSendMesg(&q, 1, OS_MESG_NOBLOCK) == 0);
+    CHECK(osSendMesg(&q, 2, OS_MESG_NOBLOCK) == 0);
+    tc.q = &q;
+    tc.value = 99;
+    CHECK(callbacks.thread_create(callbacks.userdata, "jam", jam_thread, &tc, 0, 0, &thread) == N64PSP_OK);
+    CHECK(wait_for_hook(&fp) == 0);
+    CHECK(osRecvMesg(&q, &out, OS_MESG_BLOCK) == 0 && out == 1);
+    CHECK(callbacks.thread_join(callbacks.userdata, thread, &code) == N64PSP_OK);
+    callbacks.thread_destroy(callbacks.userdata, thread);
+    CHECK(code == 0);
+    CHECK(osRecvMesg(&q, &out, OS_MESG_NOBLOCK) == 0 && out == 99);
+    CHECK(osRecvMesg(&q, &out, OS_MESG_NOBLOCK) == 0 && out == 2);
+    fp.base.sem_destroy(fp.base.userdata, fp.sem_wait_hook);
+    fp.sem_wait_hook = NULL;
+    CHECK(reset_runtime_with(NULL) == 0);
+    return 0;
+}
+
+static int test_uncontended_path_uses_no_semaphores(void) {
     fault_platform fp;
     n64psp_platform_callbacks callbacks;
     OSMesg storage[1];
@@ -574,19 +723,11 @@ static int test_post_failure_rollbacks(void) {
     osCreateMesgQueue(&q, storage, 1);
     fp.sem_post_calls = 0;
     fp.sem_post_fail_after = 1;
-    CHECK(osSendMesg(&q, 1, OS_MESG_NOBLOCK) == -1);
+    CHECK(osSendMesg(&q, 1, OS_MESG_NOBLOCK) == 0);
+    CHECK(osRecvMesg(&q, &out, OS_MESG_NOBLOCK) == 0 && out == 1);
+    CHECK(fp.sem_post_calls == 0);
     fp.sem_post_fail_after = 0;
     CHECK(q.validCount == 0);
-    CHECK(osSendMesg(&q, 2, OS_MESG_NOBLOCK) == 0);
-    CHECK(osRecvMesg(&q, &out, OS_MESG_NOBLOCK) == 0 && out == 2);
-
-    CHECK(osSendMesg(&q, 3, OS_MESG_NOBLOCK) == 0);
-    fp.sem_post_calls = 0;
-    fp.sem_post_fail_after = 1;
-    CHECK(osRecvMesg(&q, &out, OS_MESG_NOBLOCK) == -1);
-    fp.sem_post_fail_after = 0;
-    CHECK(q.validCount == 1);
-    CHECK(osRecvMesg(&q, &out, OS_MESG_NOBLOCK) == 0 && out == 3);
     CHECK(reset_runtime_with(NULL) == 0);
     return 0;
 }
@@ -695,7 +836,10 @@ int main(void) {
     CHECK(test_reinit_and_address_reuse() == 0);
     CHECK(test_reinit_and_shutdown_busy_waiters() == 0);
     CHECK(test_concurrent_create_and_lookup() == 0);
-    CHECK(test_post_failure_rollbacks() == 0);
+    CHECK(test_multiple_blocked_senders_and_receivers() == 0);
+    CHECK(test_no_stale_wake_token_after_drain() == 0);
+    CHECK(test_jam_contention_after_wraparound() == 0);
+    CHECK(test_uncontended_path_uses_no_semaphores() == 0);
     CHECK(test_partial_creation_failure() == 0);
     CHECK(test_time() == 0);
     CHECK(test_bridge() == 0);

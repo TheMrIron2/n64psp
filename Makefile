@@ -4,6 +4,8 @@ PSP_AR ?= psp-ar
 MKSFOEX ?= mksfoex
 PACK_PBP ?= pack-pbp
 PSP_FIXUP_IMPORTS ?= psp-fixup-imports
+N64PSP_QUEUE_COUNTERS ?= 0
+N64PSP_PSP_BENCHMARKS ?= 0
 
 HOST_CC ?= cc
 BUILD_PSP := build-psp
@@ -34,18 +36,30 @@ PSP_LIBS := \
 	$(BUILD_PSP)/libn64psp_trace_backend.a \
 	$(BUILD_PSP)/libn64psp_platform_psp.a
 
+PSP_OPT_FLAGS ?= -O2
 PSP_CFLAGS := -std=c99 -Wall -Wextra -Wconversion -Wshadow -Iinclude -I$(PSPDEV)/psp/include -I$(PSPSDK)/include \
 	-D__PSP__ -DPSP -D_PSP_FW_VERSION=600
+PSP_CFLAGS += $(PSP_OPT_FLAGS)
+ifeq ($(N64PSP_QUEUE_COUNTERS),1)
+PSP_CFLAGS += -DN64PSP_QUEUE_COUNTERS=1
+endif
+ifeq ($(N64PSP_PSP_BENCHMARKS),1)
+PSP_CFLAGS += -DN64PSP_PSP_BENCHMARKS=1
+endif
 PSP_LDFLAGS := -L$(PSPDEV)/lib -L$(PSPDEV)/psp/lib -L$(PSPSDK)/lib -Wl,-zmax-page-size=128
 PSP_LDLIBS := -lpspdebug -lpspdisplay -lpspge -lpspctrl -lpsprtc -lpspkernel -lpspsdk -lc
 
 HOST_SOURCES := $(COMMON_SOURCES) $(HOST_PLATFORM_SOURCES)
 HOST_TEST_OBJECTS := $(patsubst %.c,$(BUILD_HOST)/%.o,$(HOST_SOURCES) tests/test_main.c)
 HOST_SMOKE_OBJECTS := $(patsubst %.c,$(BUILD_HOST)/%.o,$(HOST_SOURCES) examples/host_smoke/main.c)
+HOST_BENCHMARK_OBJECTS := $(patsubst %.c,$(BUILD_HOST)/%.o,$(HOST_SOURCES) examples/host_benchmark/main.c)
 HOST_CFLAGS := -std=c99 -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Iinclude
+ifeq ($(N64PSP_QUEUE_COUNTERS),1)
+HOST_CFLAGS += -DN64PSP_QUEUE_COUNTERS=1
+endif
 HOST_LDLIBS := -pthread
 
-.PHONY: all psp eboot test smoke-host inspect-psp clean distclean
+.PHONY: all psp eboot test smoke-host benchmark-host inspect-psp clean distclean
 
 all: psp
 
@@ -94,11 +108,17 @@ $(BUILD_HOST)/n64psp_tests: $(HOST_TEST_OBJECTS)
 $(BUILD_HOST)/n64psp_host_smoke: $(HOST_SMOKE_OBJECTS)
 	$(HOST_CC) -o $@ $^ $(HOST_LDLIBS)
 
+$(BUILD_HOST)/n64psp_host_benchmark: $(HOST_BENCHMARK_OBJECTS)
+	$(HOST_CC) -o $@ $^ $(HOST_LDLIBS)
+
 test: $(BUILD_HOST)/n64psp_tests
 	./$(BUILD_HOST)/n64psp_tests
 
 smoke-host: $(BUILD_HOST)/n64psp_host_smoke
 	./$(BUILD_HOST)/n64psp_host_smoke
+
+benchmark-host: $(BUILD_HOST)/n64psp_host_benchmark
+	./$(BUILD_HOST)/n64psp_host_benchmark
 
 inspect-psp: $(BUILD_PSP)/EBOOT.PBP
 	file $(BUILD_PSP)/n64psp_psp_smoke $(BUILD_PSP)/EBOOT.PBP

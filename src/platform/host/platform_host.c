@@ -19,6 +19,10 @@ struct n64psp_platform_mutex {
     pthread_mutex_t mutex;
 };
 
+struct n64psp_platform_critical {
+    pthread_mutex_t mutex;
+};
+
 struct n64psp_platform_thread {
     pthread_t thread;
     n64psp_thread_entry entry;
@@ -160,6 +164,47 @@ static void host_mutex_destroy(void *userdata, n64psp_platform_mutex *mutex) {
     }
 }
 
+static n64psp_result host_critical_create(void *userdata, n64psp_platform_critical **out_critical) {
+    (void)userdata;
+    if (!out_critical) {
+        return N64PSP_ERROR_INVALID_ARGUMENT;
+    }
+    n64psp_platform_critical *critical = (n64psp_platform_critical *)calloc(1, sizeof(*critical));
+    if (!critical) {
+        return N64PSP_ERROR_NO_MEMORY;
+    }
+    pthread_mutex_init(&critical->mutex, NULL);
+    *out_critical = critical;
+    return N64PSP_OK;
+}
+
+static n64psp_result host_critical_enter(void *userdata, n64psp_platform_critical *critical, uintptr_t *out_state) {
+    (void)userdata;
+    if (!critical) {
+        return N64PSP_ERROR_INVALID_ARGUMENT;
+    }
+    if (out_state) {
+        *out_state = 0;
+    }
+    return pthread_mutex_lock(&critical->mutex) == 0 ? N64PSP_OK : N64PSP_ERROR_PLATFORM;
+}
+
+static void host_critical_leave(void *userdata, n64psp_platform_critical *critical, uintptr_t state) {
+    (void)userdata;
+    (void)state;
+    if (critical) {
+        pthread_mutex_unlock(&critical->mutex);
+    }
+}
+
+static void host_critical_destroy(void *userdata, n64psp_platform_critical *critical) {
+    (void)userdata;
+    if (critical) {
+        pthread_mutex_destroy(&critical->mutex);
+        free(critical);
+    }
+}
+
 static void *host_thread_main(void *arg) {
     n64psp_platform_thread *thread = (n64psp_platform_thread *)arg;
     thread->result = thread->entry(thread->userdata);
@@ -227,6 +272,10 @@ n64psp_result n64psp_platform_host_get_callbacks(n64psp_platform_callbacks *out_
     out_callbacks->mutex_lock = host_mutex_lock;
     out_callbacks->mutex_unlock = host_mutex_unlock;
     out_callbacks->mutex_destroy = host_mutex_destroy;
+    out_callbacks->critical_create = host_critical_create;
+    out_callbacks->critical_enter = host_critical_enter;
+    out_callbacks->critical_leave = host_critical_leave;
+    out_callbacks->critical_destroy = host_critical_destroy;
     out_callbacks->thread_create = host_thread_create;
     out_callbacks->thread_join = host_thread_join;
     out_callbacks->thread_destroy = host_thread_destroy;

@@ -30,6 +30,15 @@ operation. Blocking queue wake-ups worked across SF64's PSP worker threads and
 performance was comparable to SF64's previous polling queue implementation.
 This is not a complete playthrough or exhaustive edge-case validation.
 
+Additional physical PSP diagnostics showed the standalone optimized queue hot
+path around 1.2-1.4 million uncontended operations per second and the
+capacity-one two-thread blocking ping-pong around 115,000 queue operations per
+second. SF64 title-screen aggregate counters showed matched block/wake/retry
+traffic, no spurious wake-ups, and no evidence of stale notification tokens.
+PPSSPP currently shows a much larger slowdown with the same queue counters, so
+that remains an emulator-specific scheduling/timing discrepancy pending more
+evidence.
+
 Applications must stop and join all queue-using threads before final runtime
 shutdown. High-rate event coalescing is an application/platform-adapter policy,
 not part of the generic message queue implementation.

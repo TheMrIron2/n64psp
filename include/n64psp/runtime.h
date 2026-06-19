@@ -17,6 +17,27 @@ n64psp_result n64psp_runtime_register_renderer(const n64psp_renderer_callbacks *
 n64psp_result n64psp_runtime_init(void);
 n64psp_result n64psp_runtime_shutdown(void);
 int n64psp_runtime_is_initialized(void);
+
+typedef struct n64psp_queue_counters {
+    uint64_t send_calls;
+    uint64_t jam_calls;
+    uint64_t recv_calls;
+    uint64_t uncontended_successes;
+    uint64_t sender_blocks;
+    uint64_t receiver_blocks;
+    uint64_t sender_wake_signals;
+    uint64_t receiver_wake_signals;
+    uint64_t retry_wakeups;
+    uint64_t spurious_wakeups;
+    uint64_t failed_nonblocking;
+    uint32_t max_sender_waiters;
+    uint32_t max_receiver_waiters;
+} n64psp_queue_counters;
+
+void n64psp_queue_reset_counters(void);
+void n64psp_queue_get_counters(n64psp_queue_counters *out_counters);
+void n64psp_queue_dump_counters(const char *label);
+
 void n64psp_log(const char *message);
 void n64psp_fatal(const char *message);
 

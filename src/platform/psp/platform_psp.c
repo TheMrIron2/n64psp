@@ -9,12 +9,20 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef N64PSP_PSP_DIAG_SYNC
+#define N64PSP_PSP_DIAG_SYNC 0
+#endif
+
 struct n64psp_platform_sem {
     SceUID id;
 };
 
 struct n64psp_platform_mutex {
     SceUID id;
+};
+
+struct n64psp_platform_critical {
+    int unused;
 };
 
 struct n64psp_platform_thread {
@@ -26,6 +34,12 @@ struct n64psp_platform_thread {
 };
 
 static n64psp_platform_psp_diag g_psp_diag;
+
+#if N64PSP_PSP_DIAG_SYNC
+#define PSP_DIAG_SYNC_ASSIGN(field, value) (g_psp_diag.field = (value))
+#else
+#define PSP_DIAG_SYNC_ASSIGN(field, value) ((void)(value))
+#endif
 
 static void psp_diag_reset_thread(n64psp_platform_thread *thread, void *userdata) {
     g_psp_diag.thread_create_raw = 0;
@@ -78,7 +92,7 @@ static n64psp_result psp_sem_create(void *userdata, uint32_t initial, uint32_t m
         return N64PSP_ERROR_NO_MEMORY;
     }
     sem->id = sceKernelCreateSema("n64psp-sem", 0, (int)initial, (int)maximum, NULL);
-    g_psp_diag.sem_create_raw = sem->id;
+    PSP_DIAG_SYNC_ASSIGN(sem_create_raw, sem->id);
     if (sem->id < 0) {
         free(sem);
         return N64PSP_ERROR_PLATFORM;
@@ -92,8 +106,9 @@ static n64psp_result psp_sem_wait(void *userdata, n64psp_platform_sem *sem) {
     if (!sem) {
         return N64PSP_ERROR_INVALID_ARGUMENT;
     }
-    g_psp_diag.sem_wait_raw = sceKernelWaitSema(sem->id, 1, NULL);
-    return g_psp_diag.sem_wait_raw < 0 ? N64PSP_ERROR_PLATFORM : N64PSP_OK;
+    int raw = sceKernelWaitSema(sem->id, 1, NULL);
+    PSP_DIAG_SYNC_ASSIGN(sem_wait_raw, raw);
+    return raw < 0 ? N64PSP_ERROR_PLATFORM : N64PSP_OK;
 }
 
 static n64psp_result psp_sem_try_wait(void *userdata, n64psp_platform_sem *sem) {
@@ -101,8 +116,9 @@ static n64psp_result psp_sem_try_wait(void *userdata, n64psp_platform_sem *sem) 
     if (!sem) {
         return N64PSP_ERROR_INVALID_ARGUMENT;
     }
-    g_psp_diag.sem_wait_raw = sceKernelPollSema(sem->id, 1);
-    return g_psp_diag.sem_wait_raw < 0 ? N64PSP_ERROR_TIMEOUT : N64PSP_OK;
+    int raw = sceKernelPollSema(sem->id, 1);
+    PSP_DIAG_SYNC_ASSIGN(sem_wait_raw, raw);
+    return raw < 0 ? N64PSP_ERROR_TIMEOUT : N64PSP_OK;
 }
 
 static n64psp_result psp_sem_post(void *userdata, n64psp_platform_sem *sem) {
@@ -110,14 +126,15 @@ static n64psp_result psp_sem_post(void *userdata, n64psp_platform_sem *sem) {
     if (!sem) {
         return N64PSP_ERROR_INVALID_ARGUMENT;
     }
-    g_psp_diag.sem_signal_raw = sceKernelSignalSema(sem->id, 1);
-    return g_psp_diag.sem_signal_raw < 0 ? N64PSP_ERROR_PLATFORM : N64PSP_OK;
+    int raw = sceKernelSignalSema(sem->id, 1);
+    PSP_DIAG_SYNC_ASSIGN(sem_signal_raw, raw);
+    return raw < 0 ? N64PSP_ERROR_PLATFORM : N64PSP_OK;
 }
 
 static void psp_sem_destroy(void *userdata, n64psp_platform_sem *sem) {
     (void)userdata;
     if (sem) {
-        g_psp_diag.sem_delete_raw = sceKernelDeleteSema(sem->id);
+        PSP_DIAG_SYNC_ASSIGN(sem_delete_raw, sceKernelDeleteSema(sem->id));
         free(sem);
     }
 }
@@ -132,7 +149,7 @@ static n64psp_result psp_mutex_create(void *userdata, n64psp_platform_mutex **ou
         return N64PSP_ERROR_NO_MEMORY;
     }
     mutex->id = sceKernelCreateSema("n64psp-mutex", 0, 1, 1, NULL);
-    g_psp_diag.mutex_create_raw = mutex->id;
+    PSP_DIAG_SYNC_ASSIGN(mutex_create_raw, mutex->id);
     if (mutex->id < 0) {
         free(mutex);
         return N64PSP_ERROR_PLATFORM;
@@ -146,23 +163,59 @@ static n64psp_result psp_mutex_lock(void *userdata, n64psp_platform_mutex *mutex
     if (!mutex) {
         return N64PSP_ERROR_INVALID_ARGUMENT;
     }
-    g_psp_diag.mutex_lock_raw = sceKernelWaitSema(mutex->id, 1, NULL);
-    return g_psp_diag.mutex_lock_raw < 0 ? N64PSP_ERROR_PLATFORM : N64PSP_OK;
+    int raw = sceKernelWaitSema(mutex->id, 1, NULL);
+    PSP_DIAG_SYNC_ASSIGN(mutex_lock_raw, raw);
+    return raw < 0 ? N64PSP_ERROR_PLATFORM : N64PSP_OK;
 }
 
 static void psp_mutex_unlock(void *userdata, n64psp_platform_mutex *mutex) {
     (void)userdata;
     if (mutex) {
-        g_psp_diag.mutex_unlock_raw = sceKernelSignalSema(mutex->id, 1);
+        PSP_DIAG_SYNC_ASSIGN(mutex_unlock_raw, sceKernelSignalSema(mutex->id, 1));
     }
 }
 
 static void psp_mutex_destroy(void *userdata, n64psp_platform_mutex *mutex) {
     (void)userdata;
     if (mutex) {
-        g_psp_diag.mutex_delete_raw = sceKernelDeleteSema(mutex->id);
+        PSP_DIAG_SYNC_ASSIGN(mutex_delete_raw, sceKernelDeleteSema(mutex->id));
         free(mutex);
     }
+}
+
+static n64psp_result psp_critical_create(void *userdata, n64psp_platform_critical **out_critical) {
+    (void)userdata;
+    if (!out_critical) {
+        return N64PSP_ERROR_INVALID_ARGUMENT;
+    }
+    n64psp_platform_critical *critical = (n64psp_platform_critical *)malloc(sizeof(*critical));
+    if (!critical) {
+        return N64PSP_ERROR_NO_MEMORY;
+    }
+    critical->unused = 0;
+    *out_critical = critical;
+    return N64PSP_OK;
+}
+
+static n64psp_result psp_critical_enter(void *userdata, n64psp_platform_critical *critical, uintptr_t *out_state) {
+    (void)userdata;
+    (void)critical;
+    if (!out_state) {
+        return N64PSP_ERROR_INVALID_ARGUMENT;
+    }
+    *out_state = (uintptr_t)sceKernelCpuSuspendIntr();
+    return N64PSP_OK;
+}
+
+static void psp_critical_leave(void *userdata, n64psp_platform_critical *critical, uintptr_t state) {
+    (void)userdata;
+    (void)critical;
+    sceKernelCpuResumeIntr((SceUInt)state);
+}
+
+static void psp_critical_destroy(void *userdata, n64psp_platform_critical *critical) {
+    (void)userdata;
+    free(critical);
 }
 
 static int psp_thread_main(SceSize args, void *argp) {
@@ -266,6 +319,10 @@ n64psp_result n64psp_platform_psp_get_callbacks(n64psp_platform_callbacks *out_c
     out_callbacks->mutex_lock = psp_mutex_lock;
     out_callbacks->mutex_unlock = psp_mutex_unlock;
     out_callbacks->mutex_destroy = psp_mutex_destroy;
+    out_callbacks->critical_create = psp_critical_create;
+    out_callbacks->critical_enter = psp_critical_enter;
+    out_callbacks->critical_leave = psp_critical_leave;
+    out_callbacks->critical_destroy = psp_critical_destroy;
     out_callbacks->thread_create = psp_thread_create;
     out_callbacks->thread_join = psp_thread_join;
     out_callbacks->thread_destroy = psp_thread_destroy;

@@ -10,6 +10,7 @@ extern "C" {
 
 typedef struct n64psp_platform_sem n64psp_platform_sem;
 typedef struct n64psp_platform_mutex n64psp_platform_mutex;
+typedef struct n64psp_platform_critical n64psp_platform_critical;
 typedef struct n64psp_platform_thread n64psp_platform_thread;
 
 typedef int (*n64psp_thread_entry)(void *userdata);
@@ -30,6 +31,11 @@ typedef struct n64psp_platform_callbacks {
     n64psp_result (*mutex_lock)(void *userdata, n64psp_platform_mutex *mutex);
     void (*mutex_unlock)(void *userdata, n64psp_platform_mutex *mutex);
     void (*mutex_destroy)(void *userdata, n64psp_platform_mutex *mutex);
+
+    n64psp_result (*critical_create)(void *userdata, n64psp_platform_critical **out_critical);
+    n64psp_result (*critical_enter)(void *userdata, n64psp_platform_critical *critical, uintptr_t *out_state);
+    void (*critical_leave)(void *userdata, n64psp_platform_critical *critical, uintptr_t state);
+    void (*critical_destroy)(void *userdata, n64psp_platform_critical *critical);
 
     n64psp_result (*thread_create)(void *userdata, const char *name, n64psp_thread_entry entry, void *thread_userdata,
                                    uint32_t stack_size, int priority, n64psp_platform_thread **out_thread);
