@@ -116,9 +116,9 @@ PSP_LDLIBS := \
 	-lpspge \
 	-lpspctrl \
 	-lpsprtc \
-	-lpspkernel \
 	-lpspsdk \
-	-lc
+	-lc \
+	-lpspuser
 
 HOST_SOURCES := \
 	$(COMMON_SOURCES) \
