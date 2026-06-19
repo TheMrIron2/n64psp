@@ -10,7 +10,6 @@
             return 1;                                                                                                  \
         }                                                                                                              \
     } while (0)
-
     
 typedef char n64psp_vec4f_size_must_be_16[
     (sizeof(n64psp_vec4f) == 16) ? 1 : -1

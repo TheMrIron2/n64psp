@@ -211,8 +211,6 @@ int main(void) {
     }
     if (n64psp_psp_math_smoke() != 0) {
         pspDebugScreenPrintf("math smoke failed\n");
-        pspDebugScreenPrintf("waiting 10 seconds before exit\n");
-        sceKernelDelayThread(10 * 1000000);
         sceKernelExitGame();
         return 6;
     }

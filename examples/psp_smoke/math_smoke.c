@@ -240,7 +240,6 @@ static int run_batch_correctness_case(
     const n64psp_mat4f* first_matrix,
     const n64psp_mat4f* second_matrix
 ) {
-    
 static const unsigned int counts[] = {
     0u,
     1u,
