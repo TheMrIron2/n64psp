@@ -1,6 +1,7 @@
 #include "n64psp/bridge.h"
 #include "n64psp/platform.h"
 #include "n64psp/runtime.h"
+#include "math_smoke.h"
 #include <pspdebug.h>
 #include <pspdisplay.h>
 #include <pspkernel.h>
@@ -208,16 +209,21 @@ int main(void) {
         sceKernelExitGame();
         return 5;
     }
+    if (n64psp_psp_math_smoke() != 0) {
+        pspDebugScreenPrintf("math smoke failed\n");
+        sceKernelExitGame();
+        return 6;
+    }
 #if N64PSP_PSP_BENCHMARKS
     if (run_psp_queue_benchmark() != 0) {
         pspDebugScreenPrintf("queue benchmark failed\n");
         sceKernelExitGame();
-        return 6;
+        return 7;
     }
     if (run_psp_pingpong_benchmark(&platform) != 0) {
         pspDebugScreenPrintf("queue pingpong benchmark failed\n");
         sceKernelExitGame();
-        return 7;
+        return 8;
     }
 #endif
     n64psp_runtime_shutdown();
