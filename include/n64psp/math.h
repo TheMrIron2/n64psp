@@ -24,6 +24,11 @@ typedef struct N64PSP_ALIGN16 n64psp_mat4f {
     float m[4][4];
 } n64psp_mat4f;
 
+typedef struct N64PSP_ALIGN16 n64psp_vec4f_pair {
+    n64psp_vec4f first;
+    n64psp_vec4f second;
+} n64psp_vec4f_pair;
+
 /*
  * Matrix storage convention
  * -------------------------
@@ -66,6 +71,51 @@ void n64psp_mat4f_transform_vec4(
     n64psp_vec4f* out,
     const n64psp_mat4f* matrix,
     const n64psp_vec4f* vector
+);
+
+/*
+ * Transforms each input vector independently through two matrices:
+ *
+ *     output[i].first  = first_matrix  * input[i]
+ *     output[i].second = second_matrix * input[i]
+ *
+ * Both transformations consume the same original input vector.
+ *
+ * count == 0:
+ *     Performs no memory access. All pointers may be NULL.
+ *
+ * count > 0:
+ *     All pointers must be non-NULL.
+ *     Matrices, input and output must be aligned to 16 bytes.
+ *
+ * Layout:
+ *     Input elements are contiguous 16-byte n64psp_vec4f objects.
+ *     Output elements are contiguous 32-byte n64psp_vec4f_pair objects.
+ *
+ * Overlap:
+ *     Input and output ranges must not overlap.
+ *     Matrix storage must not overlap input or output storage.
+ *     first_matrix == second_matrix is permitted.
+ *
+ * Dispatch:
+ *     Host builds use the scalar implementation.
+ *     PSP builds with N64PSP_USE_VFPU=0 use the scalar implementation.
+ *     PSP builds with N64PSP_USE_VFPU=1 use the VFPU implementation.
+ *
+ * Floating point:
+ *     Scalar and VFPU results are semantically equivalent but are not
+ *     required to be bit-identical.
+ *
+ * PSP callers selecting the VFPU path must execute on a thread with
+ * PSP_THREAD_ATTR_VFPU.
+ */
+
+void n64psp_mat4f_transform_vec4_2mat_batch(
+    n64psp_vec4f_pair* output,
+    const n64psp_mat4f* first_matrix,
+    const n64psp_mat4f* second_matrix,
+    const n64psp_vec4f* input,
+    size_t count
 );
 
 #ifdef __cplusplus
