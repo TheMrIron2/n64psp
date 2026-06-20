@@ -148,8 +148,8 @@ n64psp_mat4f_transform_vec4_2mat_batch_vfpu:
         .-n64psp_mat4f_transform_vec4_2mat_batch_vfpu
 
     .align 2
-    .global n64psp_mat4f_transform_vec4_chain2_batch_vfpu
-    .type n64psp_mat4f_transform_vec4_chain2_batch_vfpu, @function
+    .global n64psp_mat4f_transform_vec4_chain2_batch_vfpu_baseline
+    .type n64psp_mat4f_transform_vec4_chain2_batch_vfpu_baseline, @function
 
 /*
  * void n64psp_mat4f_transform_vec4_chain2_batch_vfpu(
@@ -169,7 +169,7 @@ n64psp_mat4f_transform_vec4_2mat_batch_vfpu:
  * VFPU vectors R200, R201 and R202 are clobbered.
  * General-purpose register t0 is consumed as the count/end pointer.
  */
-n64psp_mat4f_transform_vec4_chain2_batch_vfpu:
+n64psp_mat4f_transform_vec4_chain2_batch_vfpu_baseline:
     beqz        $t0, 4f
     nop
 
@@ -204,7 +204,7 @@ n64psp_mat4f_transform_vec4_chain2_batch_vfpu:
     jr          $ra
     nop
 
-    .size n64psp_mat4f_transform_vec4_chain2_batch_vfpu, \
-        .-n64psp_mat4f_transform_vec4_chain2_batch_vfpu
+    .size n64psp_mat4f_transform_vec4_chain2_batch_vfpu_baseline, \
+        .-n64psp_mat4f_transform_vec4_chain2_batch_vfpu_baseline
 
     .set pop

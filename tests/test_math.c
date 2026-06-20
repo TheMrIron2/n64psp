@@ -1,5 +1,7 @@
 #include "n64psp/math.h"
 
+#include "../src/math/math_internal.h"
+
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -217,6 +219,49 @@ static int run_chain_case(
             &expected.second,
             second_matrix,
             &expected.first
+        );
+
+        CHECK(pair_equal(&actual[index], &expected));
+    }
+
+    return 0;
+}
+
+static int run_precompose_experiment_case(
+    const n64psp_mat4f* first_matrix,
+    const n64psp_mat4f* second_matrix,
+    const n64psp_vec4f* input,
+    size_t count
+) {
+    n64psp_vec4f_pair actual[MAX_BATCH_COUNT];
+    n64psp_mat4f combined;
+    size_t index;
+
+    CHECK(count <= MAX_BATCH_COUNT);
+
+    n64psp_mat4f_transform_vec4_precompose_2mat_batch_experimental(
+        actual,
+        first_matrix,
+        second_matrix,
+        input,
+        count
+    );
+
+    n64psp_mat4f_mul(&combined, second_matrix, first_matrix);
+
+    for (index = 0; index < count; ++index) {
+        n64psp_vec4f_pair expected;
+
+        n64psp_mat4f_transform_vec4(
+            &expected.first,
+            first_matrix,
+            &input[index]
+        );
+
+        n64psp_mat4f_transform_vec4(
+            &expected.second,
+            &combined,
+            &input[index]
         );
 
         CHECK(pair_equal(&actual[index], &expected));
@@ -664,9 +709,7 @@ static int test_chain_projection_modelview_order(void) {
     };
 
     n64psp_vec4f_pair chained[2];
-    n64psp_mat4f projection_modelview;
     n64psp_vec4f_pair precomposed[2];
-    size_t index;
 
     n64psp_mat4f_transform_vec4_chain2_batch(
         chained,
@@ -676,24 +719,78 @@ static int test_chain_projection_modelview_order(void) {
         2
     );
 
-    n64psp_mat4f_mul(
-        &projection_modelview,
-        &projection,
-        &modelview
-    );
-
-    n64psp_mat4f_transform_vec4_2mat_batch(
+    n64psp_mat4f_transform_vec4_precompose_2mat_batch_experimental(
         precomposed,
         &modelview,
-        &projection_modelview,
+        &projection,
         input,
         2
     );
 
-    for (index = 0; index < 2; ++index) {
-        CHECK(vector_equal(&chained[index].first, &precomposed[index].first));
-        CHECK(vector_equal(&chained[index].second, &precomposed[index].second));
-    }
+    CHECK(run_chain_case(&modelview, &projection, input, 2) == 0);
+    CHECK(run_precompose_experiment_case(
+        &modelview,
+        &projection,
+        input,
+        2
+    ) == 0);
+    CHECK(vector_equal(&chained[0].first, &precomposed[0].first));
+
+    return 0;
+}
+
+static int test_precompose_experiment_rounding_scope(void) {
+    static const float first_rows[4][4] = {
+        {10000.0f, 1000.0f, 0.0001f, 2.0f},
+        {1.0f, 1.25f, -3.5f, -2.0f},
+        {-0.25f, -1000.0f, 3.5f, -100000.0f},
+        {-0.25f, -100.0f, 100000.0f, -1.25f},
+    };
+
+    static const float second_rows[4][4] = {
+        {0.5f, -0.5f, 2.0f, 1.25f},
+        {-0.0001f, 0.001f, -100.0f, 3.5f},
+        {10000.0f, 0.1f, -100.0f, -0.1f},
+        {-0.1f, 1000.0f, -0.001f, 0.5f},
+    };
+
+    const n64psp_mat4f first_matrix = matrix_from_rows(first_rows);
+    const n64psp_mat4f second_matrix = matrix_from_rows(second_rows);
+    const n64psp_vec4f input = {0.001f, 2.0f, -100.0f, 2.0f};
+    n64psp_vec4f_pair chained;
+    n64psp_vec4f_pair precomposed;
+
+    n64psp_mat4f_transform_vec4_chain2_batch(
+        &chained,
+        &first_matrix,
+        &second_matrix,
+        &input,
+        1
+    );
+
+    n64psp_mat4f_transform_vec4_precompose_2mat_batch_experimental(
+        &precomposed,
+        &first_matrix,
+        &second_matrix,
+        &input,
+        1
+    );
+
+    CHECK(run_chain_case(&first_matrix, &second_matrix, &input, 1) == 0);
+    CHECK(run_precompose_experiment_case(
+        &first_matrix,
+        &second_matrix,
+        &input,
+        1
+    ) == 0);
+
+    CHECK(vector_equal(&chained.first, &precomposed.first));
+    CHECK(vector_equal(&chained.second, &precomposed.second));
+    CHECK(memcmp(
+        &chained.second,
+        &precomposed.second,
+        sizeof(chained.second)
+    ) != 0);
 
     return 0;
 }
@@ -793,6 +890,73 @@ static int test_chain_random_vectors(void) {
     return 0;
 }
 
+static int test_batch_count_coverage(void) {
+    static const size_t counts[] = {
+        0u,
+        1u,
+        2u,
+        3u,
+        4u,
+        8u,
+        16u,
+        31u,
+        32u,
+        63u,
+        64u,
+    };
+
+    static const float first_rows[4][4] = {
+        {1.25f, -2.5f, 3.75f, 4.5f},
+        {5.5f, 6.25f, -7.75f, 8.0f},
+        {-9.5f, 10.0f, 11.25f, -12.5f},
+        {13.75f, -14.25f, 15.5f, 16.0f},
+    };
+
+    static const float second_rows[4][4] = {
+        {-3.5f, 2.25f, 1.5f, 0.75f},
+        {4.25f, -5.5f, 6.75f, 7.25f},
+        {8.5f, 9.25f, -10.75f, 11.5f},
+        {12.25f, 13.5f, 14.75f, -15.25f},
+    };
+
+    const n64psp_mat4f first_matrix = matrix_from_rows(first_rows);
+    const n64psp_mat4f second_matrix = matrix_from_rows(second_rows);
+    n64psp_vec4f input[MAX_BATCH_COUNT];
+    size_t count_index;
+    size_t index;
+
+    random_state = UINT32_C(0xabcdef01);
+
+    for (index = 0; index < MAX_BATCH_COUNT; ++index) {
+        input[index].x = next_random_float();
+        input[index].y = next_random_float();
+        input[index].z = next_random_float();
+        input[index].w = next_random_float();
+    }
+
+    for (
+        count_index = 0;
+        count_index < sizeof(counts) / sizeof(counts[0]);
+        ++count_index
+    ) {
+        CHECK(run_independent_case(
+            &first_matrix,
+            &second_matrix,
+            input,
+            counts[count_index]
+        ) == 0);
+
+        CHECK(run_chain_case(
+            &first_matrix,
+            &second_matrix,
+            input,
+            counts[count_index]
+        ) == 0);
+    }
+
+    return 0;
+}
+
 int main(void) {
     CHECK(test_layout_and_alignment() == 0);
     CHECK(test_matrix_multiply_and_transform() == 0);
@@ -806,8 +970,10 @@ int main(void) {
     CHECK(test_chain_identity_and_independent_equivalence() == 0);
     CHECK(test_chain_multiple_matrix_shapes() == 0);
     CHECK(test_chain_projection_modelview_order() == 0);
+    CHECK(test_precompose_experiment_rounding_scope() == 0);
     CHECK(test_chain_canaries() == 0);
     CHECK(test_chain_random_vectors() == 0);
+    CHECK(test_batch_count_coverage() == 0);
 
     puts("n64psp math tests passed");
     return 0;

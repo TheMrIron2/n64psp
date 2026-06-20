@@ -17,6 +17,18 @@
 #define N64PSP_PSP_BENCHMARKS 0
 #endif
 
+#ifndef N64PSP_VFPU_TRANSFORM_EXPERIMENT
+#define N64PSP_VFPU_TRANSFORM_EXPERIMENT 0
+#endif
+
+#ifndef N64PSP_GIT_COMMIT
+#define N64PSP_GIT_COMMIT "unknown"
+#endif
+
+#ifndef N64PSP_PSP_OPT_FLAGS
+#define N64PSP_PSP_OPT_FLAGS "unknown"
+#endif
+
 static volatile float math_benchmark_checksum;
 
 enum {
@@ -26,7 +38,13 @@ enum {
 static n64psp_vec4f math_batch_input[MATH_BATCH_MAX_COUNT];
 static n64psp_vec4f_pair math_batch_scalar[MATH_BATCH_MAX_COUNT];
 static n64psp_vec4f_pair math_batch_selected[MATH_BATCH_MAX_COUNT];
+#if defined(__PSP__) && N64PSP_USE_VFPU
+static n64psp_vec4f_pair math_batch_baseline[MATH_BATCH_MAX_COUNT];
+static n64psp_vec4f_pair math_batch_candidate[MATH_BATCH_MAX_COUNT];
+#endif
+#if N64PSP_PSP_BENCHMARKS
 static n64psp_vec4f_pair math_batch_independent[MATH_BATCH_MAX_COUNT];
+#endif
 
 static uint32_t float_bits(float value) {
     uint32_t bits;
@@ -92,9 +110,9 @@ static const char* component_name(unsigned int component) {
 
 static const char* selected_path_name(void) {
 #if N64PSP_USE_VFPU
-    return "VFPU";
+    return "chain2 VFPU";
 #else
-    return "scalar";
+    return "chain2 scalar";
 #endif
 }
 
@@ -257,10 +275,13 @@ static int run_batch_correctness_case(
         0u,
         1u,
         2u,
+        3u,
         4u,
         8u,
         16u,
+        31u,
         32u,
+        63u,
         64u,
     };
 
@@ -400,6 +421,52 @@ static int run_batch_correctness_case(
             );
             return 1;
         }
+
+#if defined(__PSP__) && N64PSP_USE_VFPU
+        n64psp_mat4f_transform_vec4_chain2_batch_vfpu_baseline(
+            math_batch_baseline,
+            first_matrix,
+            second_matrix,
+            math_batch_input,
+            count
+        );
+
+        n64psp_mat4f_transform_vec4_precompose_2mat_batch_vfpu(
+            math_batch_candidate,
+            first_matrix,
+            second_matrix,
+            math_batch_input,
+            count
+        );
+
+        if (!compare_batch_output(
+                math_batch_scalar,
+                math_batch_baseline,
+                count,
+                "chain2 baseline"
+            )) {
+            pspDebugScreenPrintf(
+                "chain2 baseline failed: %s count=%u\n",
+                name,
+                count
+            );
+            return 1;
+        }
+
+        if (!compare_batch_output(
+                math_batch_scalar,
+                math_batch_candidate,
+                count,
+                "precompose + independent VFPU"
+            )) {
+            pspDebugScreenPrintf(
+                "precompose + independent VFPU failed: %s count=%u\n",
+                name,
+                count
+            );
+            return 1;
+        }
+#endif
     }
 
     pspDebugScreenPrintf("math batches %s: PASS\n", name);
@@ -509,6 +576,13 @@ static int run_batch_correctness(void) {
     pspDebugScreenPrintf(
         "math batch selected path: %s\n",
         selected_path_name()
+    );
+    pspDebugScreenPrintf(
+        "math git=%s vfpu=%d transform_experiment=%d opt=%s\n",
+        N64PSP_GIT_COMMIT,
+        N64PSP_USE_VFPU,
+        N64PSP_VFPU_TRANSFORM_EXPERIMENT,
+        N64PSP_PSP_OPT_FLAGS
     );
 
     return 0;
@@ -665,7 +739,7 @@ static void print_batch_measurement(
     unsigned int count
 ) {
     pspDebugScreenPrintf(
-        " %-18s total=%llu us batch=%llu ns vertex=%llu ns\n",
+        " %-18s total=%llu us ns/batch=%llu ns/vertex=%llu\n",
         name,
         (unsigned long long)elapsed,
         (unsigned long long)nanoseconds_per_batch(elapsed, repetitions),
@@ -722,6 +796,24 @@ static void batch_benchmark_warmup(
             MATH_BATCH_MAX_COUNT
         );
 
+#if defined(__PSP__) && N64PSP_USE_VFPU
+        n64psp_mat4f_transform_vec4_chain2_batch_vfpu_baseline(
+            math_batch_baseline,
+            first_matrix,
+            second_matrix,
+            math_batch_input,
+            MATH_BATCH_MAX_COUNT
+        );
+
+        n64psp_mat4f_transform_vec4_precompose_2mat_batch_vfpu(
+            math_batch_candidate,
+            first_matrix,
+            second_matrix,
+            math_batch_input,
+            MATH_BATCH_MAX_COUNT
+        );
+#endif
+
         n64psp_mat4f_transform_vec4_2mat_batch(
             math_batch_independent,
             first_matrix,
@@ -743,16 +835,22 @@ static void batch_benchmark_warmup(
 
     consume_batch(math_batch_scalar, MATH_BATCH_MAX_COUNT);
     consume_batch(math_batch_selected, MATH_BATCH_MAX_COUNT);
+    consume_batch(math_batch_baseline, MATH_BATCH_MAX_COUNT);
+    consume_batch(math_batch_candidate, MATH_BATCH_MAX_COUNT);
     consume_batch(math_batch_independent, MATH_BATCH_MAX_COUNT);
 }
 
 static int run_batch_benchmark(void) {
     static const unsigned int counts[] = {
         1u,
+        2u,
+        3u,
         4u,
         8u,
         16u,
+        31u,
         32u,
+        63u,
         64u,
     };
 
@@ -782,7 +880,11 @@ static int run_batch_benchmark(void) {
     batch_benchmark_warmup(&first_matrix, &second_matrix);
 
     pspDebugScreenPrintf(
-        "chain2 benchmark selected=%s\n",
+        "transform benchmark git=%s vfpu=%d experiment=%d opt=%s selected=%s\n",
+        N64PSP_GIT_COMMIT,
+        N64PSP_USE_VFPU,
+        N64PSP_VFPU_TRANSFORM_EXPERIMENT,
+        N64PSP_PSP_OPT_FLAGS,
         selected_path_name()
     );
 
@@ -799,6 +901,10 @@ static int run_batch_benchmark(void) {
         n64psp_time_us scalar_end;
         n64psp_time_us chain_start;
         n64psp_time_us chain_end;
+        n64psp_time_us baseline_start;
+        n64psp_time_us baseline_end;
+        n64psp_time_us candidate_start;
+        n64psp_time_us candidate_end;
         n64psp_time_us independent_start;
         n64psp_time_us independent_end;
         n64psp_time_us compound_start;
@@ -834,6 +940,43 @@ static int run_batch_benchmark(void) {
 
         chain_end = n64psp_time_monotonic_us();
         consume_batch(math_batch_selected, count);
+
+#if defined(__PSP__) && N64PSP_USE_VFPU
+        baseline_start = n64psp_time_monotonic_us();
+
+        for (iteration = 0; iteration < repetitions; ++iteration) {
+            n64psp_mat4f_transform_vec4_chain2_batch_vfpu_baseline(
+                math_batch_baseline,
+                &first_matrix,
+                &second_matrix,
+                math_batch_input,
+                count
+            );
+        }
+
+        baseline_end = n64psp_time_monotonic_us();
+        consume_batch(math_batch_baseline, count);
+
+        candidate_start = n64psp_time_monotonic_us();
+
+        for (iteration = 0; iteration < repetitions; ++iteration) {
+            n64psp_mat4f_transform_vec4_precompose_2mat_batch_vfpu(
+                math_batch_candidate,
+                &first_matrix,
+                &second_matrix,
+                math_batch_input,
+                count
+            );
+        }
+
+        candidate_end = n64psp_time_monotonic_us();
+        consume_batch(math_batch_candidate, count);
+#else
+        baseline_start = chain_start;
+        baseline_end = chain_end;
+        candidate_start = chain_start;
+        candidate_end = chain_end;
+#endif
 
         independent_start = n64psp_time_monotonic_us();
 
@@ -880,48 +1023,62 @@ static int run_batch_benchmark(void) {
         );
 
         print_batch_measurement(
-            "chain scalar",
+            "chain2 scalar",
             scalar_end - scalar_start,
             repetitions,
             count
         );
 
         print_batch_measurement(
-            "chain selected",
+            selected_path_name(),
             chain_end - chain_start,
             repetitions,
             count
         );
 
         print_batch_measurement(
-            "independent selected",
+            "chain2 VFPU",
+            baseline_end - baseline_start,
+            repetitions,
+            count
+        );
+
+        print_batch_measurement(
+            "precompose + independent VFPU",
+            candidate_end - candidate_start,
+            repetitions,
+            count
+        );
+
+        print_batch_measurement(
+            "independent VFPU",
             independent_end - independent_start,
             repetitions,
             count
         );
 
         print_batch_measurement(
-            "precompose+indep",
+            "precompose+independent",
             compound_end - compound_start,
             repetitions,
             count
         );
 
         print_ratio(
-            "scalar/chain",
+            "chain2 scalar / chain2 VFPU",
             scalar_end - scalar_start,
             chain_end - chain_start
         );
 
         print_ratio(
-            "indep/chain",
+            "independent / chain2 VFPU",
             independent_end - independent_start,
             chain_end - chain_start
         );
 
         print_ratio(
-            "compound/chain",
-            compound_end - compound_start,
+            "precompose+independent / chain2 VFPU",
+            candidate_end - candidate_start,
             chain_end - chain_start
         );
     }

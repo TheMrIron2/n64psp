@@ -11,9 +11,13 @@ HOST_AR ?= ar
 N64PSP_QUEUE_COUNTERS ?= 0
 N64PSP_PSP_BENCHMARKS ?= 0
 N64PSP_USE_VFPU ?= 1
+N64PSP_VFPU_TRANSFORM_EXPERIMENT ?= 0
 
-BUILD_PSP := build-psp
+BUILD_PSP ?= build-psp
 BUILD_HOST := build-host
+ARTIFACTS_DIR ?= artifacts
+N64PSP_GIT_COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || printf unknown)
+PSP_COMPILE_FLAGS_STAMP := $(BUILD_PSP)/.compile-flags
 
 PSPDEV ?= $(shell $(PSP_CONFIG) --pspdev-path)
 PSPSDK ?= $(shell $(PSP_CONFIG) --pspsdk-path)
@@ -92,7 +96,10 @@ PSP_CFLAGS := \
 	-D__PSP__ \
 	-DPSP \
 	-D_PSP_FW_VERSION=600 \
-	-DN64PSP_USE_VFPU=$(N64PSP_USE_VFPU)
+	-DN64PSP_USE_VFPU=$(N64PSP_USE_VFPU) \
+	-DN64PSP_VFPU_TRANSFORM_EXPERIMENT=$(N64PSP_VFPU_TRANSFORM_EXPERIMENT) \
+	-DN64PSP_GIT_COMMIT=\"$(N64PSP_GIT_COMMIT)\" \
+	-DN64PSP_PSP_OPT_FLAGS=\"$(PSP_OPT_FLAGS)\"
 
 PSP_CFLAGS += $(PSP_OPT_FLAGS)
 
@@ -165,8 +172,10 @@ HOST_LDLIBS := -pthread
 	smoke-host \
 	benchmark-host \
 	inspect-psp \
+	psp-vfpu-ab \
 	clean \
-	distclean
+	distclean \
+	FORCE
 
 all: psp
 
@@ -174,11 +183,16 @@ psp: eboot
 
 eboot: $(BUILD_PSP)/EBOOT.PBP
 
-$(BUILD_PSP)/%.o: %.c
+$(PSP_COMPILE_FLAGS_STAMP): FORCE
+	@mkdir -p $(@D)
+	@printf '%s\n' '$(PSP_CFLAGS)' > $@.tmp
+	@if ! cmp -s $@.tmp $@; then mv $@.tmp $@; else rm -f $@.tmp; fi
+
+$(BUILD_PSP)/%.o: %.c $(PSP_COMPILE_FLAGS_STAMP)
 	@mkdir -p $(@D)
 	$(PSP_CC) $(PSP_CFLAGS) -c $< -o $@
 
-$(BUILD_PSP)/%.o: %.S
+$(BUILD_PSP)/%.o: %.S $(PSP_COMPILE_FLAGS_STAMP)
 	@mkdir -p $(@D)
 	$(PSP_CC) $(PSP_CFLAGS) -c $< -o $@
 
@@ -268,6 +282,28 @@ inspect-psp: $(BUILD_PSP)/EBOOT.PBP
 	psp-readelf -h $(BUILD_PSP)/n64psp_psp_smoke
 	psp-objdump -f $(BUILD_PSP)/n64psp_psp_smoke
 	wc -c $(BUILD_PSP)/n64psp_psp_smoke $(BUILD_PSP)/EBOOT.PBP
+
+psp-vfpu-ab:
+	$(MAKE) clean BUILD_PSP=build-psp-vfpu-baseline
+	$(MAKE) psp BUILD_PSP=build-psp-vfpu-baseline N64PSP_USE_VFPU=1 N64PSP_VFPU_TRANSFORM_EXPERIMENT=0 N64PSP_PSP_BENCHMARKS=1
+	$(MAKE) clean BUILD_PSP=build-psp-vfpu-experiment
+	$(MAKE) psp BUILD_PSP=build-psp-vfpu-experiment N64PSP_USE_VFPU=1 N64PSP_VFPU_TRANSFORM_EXPERIMENT=1 N64PSP_PSP_BENCHMARKS=1
+	mkdir -p $(ARTIFACTS_DIR)/n64psp-vfpu-baseline $(ARTIFACTS_DIR)/n64psp-vfpu-experiment
+	cp build-psp-vfpu-baseline/EBOOT.PBP $(ARTIFACTS_DIR)/n64psp-vfpu-baseline/EBOOT.PBP
+	cp build-psp-vfpu-baseline/n64psp_psp_smoke $(ARTIFACTS_DIR)/n64psp-vfpu-baseline/n64psp_psp_smoke.elf
+	cp build-psp-vfpu-experiment/EBOOT.PBP $(ARTIFACTS_DIR)/n64psp-vfpu-experiment/EBOOT.PBP
+	cp build-psp-vfpu-experiment/n64psp_psp_smoke $(ARTIFACTS_DIR)/n64psp-vfpu-experiment/n64psp_psp_smoke.elf
+	printf '%s\n' \
+		'make psp BUILD_PSP=build-psp-vfpu-baseline N64PSP_USE_VFPU=1 N64PSP_VFPU_TRANSFORM_EXPERIMENT=0 N64PSP_PSP_BENCHMARKS=1' \
+		'make psp BUILD_PSP=build-psp-vfpu-experiment N64PSP_USE_VFPU=1 N64PSP_VFPU_TRANSFORM_EXPERIMENT=1 N64PSP_PSP_BENCHMARKS=1' \
+		> $(ARTIFACTS_DIR)/BUILD_COMMANDS.txt
+	printf '%s\n' \
+		'Install either artifact directory as ms0:/PSP/GAME/n64psp-vfpu-baseline or ms0:/PSP/GAME/n64psp-vfpu-experiment.' \
+		'Run on real PSP hardware, not PPSSPP for timing proof.' \
+		'Record the on-screen transform benchmark table for counts 1,2,3,4,8,16,31,32,63,64.' \
+		'Compare chain2 VFPU, independent VFPU, and precompose + independent VFPU rows plus metadata printed by the EBOOT.' \
+		> $(ARTIFACTS_DIR)/HARDWARE_TEST_PROTOCOL.txt
+	( cd $(ARTIFACTS_DIR) && sha256sum n64psp-vfpu-baseline/EBOOT.PBP n64psp-vfpu-baseline/n64psp_psp_smoke.elf n64psp-vfpu-experiment/EBOOT.PBP n64psp-vfpu-experiment/n64psp_psp_smoke.elf > SHA256SUMS )
 
 clean:
 	$(RM) -r $(BUILD_PSP) $(BUILD_HOST)
