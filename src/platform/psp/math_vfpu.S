@@ -126,9 +126,9 @@ n64psp_mat4f_transform_vec4_2mat_batch_vfpu:
     lv.q        R200, 0($a3)
 
     /*
-    * vtfm4.q consumes the matrices through the R-row register layout.
-    * This differs from the load aliases used by the vmmul.q routine above.
-    */
+     * vtfm4.q consumes the matrices through the R-row register layout.
+     * This differs from the load aliases used by the vmmul.q routine above.
+     */
     vtfm4.q     R201, M000, R200
     vtfm4.q     R202, M100, R200
 
@@ -146,5 +146,65 @@ n64psp_mat4f_transform_vec4_2mat_batch_vfpu:
 
     .size n64psp_mat4f_transform_vec4_2mat_batch_vfpu, \
         .-n64psp_mat4f_transform_vec4_2mat_batch_vfpu
+
+    .align 2
+    .global n64psp_mat4f_transform_vec4_chain2_batch_vfpu_baseline
+    .type n64psp_mat4f_transform_vec4_chain2_batch_vfpu_baseline, @function
+
+/*
+ * void n64psp_mat4f_transform_vec4_chain2_batch_vfpu(
+ *     n64psp_vec4f_pair* output,       // a0
+ *     const n64psp_mat4f* first,       // a1
+ *     const n64psp_mat4f* second,      // a2
+ *     const n64psp_vec4f* input,       // a3
+ *     size_t count                     // t0
+ * );
+ *
+ * All pointers must be aligned to 16 bytes when count is non-zero.
+ * Both matrices are loaded once before the loop and retained in M000/M100.
+ * The second transform consumes the first transform result directly.
+ * Input advances by 16 bytes and output advances by 32 bytes.
+ *
+ * VFPU matrices M000 and M100 are clobbered.
+ * VFPU vectors R200, R201 and R202 are clobbered.
+ * General-purpose register t0 is consumed as the count/end pointer.
+ */
+n64psp_mat4f_transform_vec4_chain2_batch_vfpu_baseline:
+    beqz        $t0, 4f
+    nop
+
+    lv.q        R000, 0($a1)
+    lv.q        R001, 16($a1)
+    lv.q        R002, 32($a1)
+    lv.q        R003, 48($a1)
+
+    lv.q        R100, 0($a2)
+    lv.q        R101, 16($a2)
+    lv.q        R102, 32($a2)
+    lv.q        R103, 48($a2)
+
+    sll         $t0, $t0, 4
+    addu        $t0, $a3, $t0
+
+3:
+    lv.q        R200, 0($a3)
+
+    vtfm4.q     R201, M000, R200
+    vtfm4.q     R202, M100, R201
+
+    sv.q        R201, 0($a0)
+    sv.q        R202, 16($a0)
+
+    addiu       $a3, $a3, 16
+
+    bne         $a3, $t0, 3b
+    addiu       $a0, $a0, 32
+
+4:
+    jr          $ra
+    nop
+
+    .size n64psp_mat4f_transform_vec4_chain2_batch_vfpu_baseline, \
+        .-n64psp_mat4f_transform_vec4_chain2_batch_vfpu_baseline
 
     .set pop

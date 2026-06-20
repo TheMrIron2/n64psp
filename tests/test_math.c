@@ -1,22 +1,30 @@
 #include "n64psp/math.h"
 
+#include "../src/math/math_internal.h"
+
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
-#define CHECK(expr)                                                                                                    \
-    do {                                                                                                               \
-        if (!(expr)) {                                                                                                 \
-            fprintf(stderr, "check failed: %s:%d: %s\n", __FILE__, __LINE__, #expr);                                  \
-            return 1;                                                                                                  \
-        }                                                                                                              \
+#define CHECK(expr)                                                        \
+    do {                                                                   \
+        if (!(expr)) {                                                     \
+            fprintf(stderr, "check failed: %s:%d: %s\n",                 \
+                    __FILE__, __LINE__, #expr);                            \
+            return 1;                                                      \
+        }                                                                  \
     } while (0)
-    
+
 typedef char n64psp_vec4f_size_must_be_16[
     (sizeof(n64psp_vec4f) == 16) ? 1 : -1
 ];
 
 typedef char n64psp_mat4f_size_must_be_64[
     (sizeof(n64psp_mat4f) == 64) ? 1 : -1
+];
+
+typedef char n64psp_vec4f_pair_size_must_be_32[
+    (sizeof(n64psp_vec4f_pair) == 32) ? 1 : -1
 ];
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -33,37 +41,69 @@ typedef char n64psp_vec4f_pair_alignment_must_be_16[
 ];
 #endif
 
-typedef char n64psp_vec4f_pair_size_must_be_32[
-    (sizeof(n64psp_vec4f_pair) == 32) ? 1 : -1
-];
+enum {
+    MAX_BATCH_COUNT = 64,
+    CANARY_WORDS = 4,
+    GUARDED_COUNT = 8
+};
+
+typedef struct N64PSP_ALIGN16 guarded_input {
+    uint32_t before[CANARY_WORDS];
+    n64psp_vec4f values[GUARDED_COUNT];
+    uint32_t after[CANARY_WORDS];
+} guarded_input;
+
+typedef struct N64PSP_ALIGN16 guarded_output {
+    uint32_t before[CANARY_WORDS];
+    n64psp_vec4f_pair values[GUARDED_COUNT];
+    uint32_t after[CANARY_WORDS];
+} guarded_output;
 
 static float absf_local(float value) {
     return value < 0.0f ? -value : value;
 }
-
-enum {
-    BATCH_CANARY_WORDS = 4,
-    BATCH_GUARDED_COUNT = 8
-};
-
-typedef struct N64PSP_ALIGN16 guarded_batch_input {
-    uint32_t before[BATCH_CANARY_WORDS];
-    n64psp_vec4f values[BATCH_GUARDED_COUNT];
-    uint32_t after[BATCH_CANARY_WORDS];
-} guarded_batch_input;
-
-typedef struct N64PSP_ALIGN16 guarded_batch_output {
-    uint32_t before[BATCH_CANARY_WORDS];
-    n64psp_vec4f_pair values[BATCH_GUARDED_COUNT];
-    uint32_t after[BATCH_CANARY_WORDS];
-} guarded_batch_output;
-
 
 static int nearly_equal(float actual, float expected) {
     const float difference = absf_local(actual - expected);
     const float scale = absf_local(expected);
 
     return difference <= 1.0e-5f + 1.0e-5f * scale;
+}
+
+static int vector_equal(
+    const n64psp_vec4f* actual,
+    const n64psp_vec4f* expected
+) {
+    if (!nearly_equal(actual->x, expected->x) ||
+        !nearly_equal(actual->y, expected->y) ||
+        !nearly_equal(actual->z, expected->z) ||
+        !nearly_equal(actual->w, expected->w)) {
+        fprintf(
+            stderr,
+            "vector mismatch: actual={%g,%g,%g,%g} "
+            "expected={%g,%g,%g,%g}\n",
+            (double)actual->x,
+            (double)actual->y,
+            (double)actual->z,
+            (double)actual->w,
+            (double)expected->x,
+            (double)expected->y,
+            (double)expected->z,
+            (double)expected->w
+        );
+        return 0;
+    }
+
+    return 1;
+}
+
+static int pair_equal(
+    const n64psp_vec4f_pair* actual,
+    const n64psp_vec4f_pair* expected
+) {
+    return
+        vector_equal(&actual->first, &expected->first) &&
+        vector_equal(&actual->second, &expected->second);
 }
 
 static n64psp_mat4f matrix_from_rows(const float rows[4][4]) {
@@ -106,8 +146,7 @@ static int matrix_equal(
                 )) {
                 fprintf(
                     stderr,
-                    "matrix mismatch at column=%lu row=%lu: "
-                    "actual=%g expected=%g\n",
+                    "matrix mismatch column=%lu row=%lu: actual=%g expected=%g\n",
                     (unsigned long)column,
                     (unsigned long)row,
                     (double)actual->m[column][row],
@@ -121,38 +160,6 @@ static int matrix_equal(
     return 1;
 }
 
-static int vector_equal(
-    const n64psp_vec4f* actual,
-    const n64psp_vec4f* expected
-) {
-    if (!nearly_equal(actual->x, expected->x) ||
-        !nearly_equal(actual->y, expected->y) ||
-        !nearly_equal(actual->z, expected->z) ||
-        !nearly_equal(actual->w, expected->w)) {
-        fprintf(
-            stderr,
-            "vector mismatch: actual={%g,%g,%g,%g} "
-            "expected={%g,%g,%g,%g}\n",
-            (double)actual->x,
-            (double)actual->y,
-            (double)actual->z,
-            (double)actual->w,
-            (double)expected->x,
-            (double)expected->y,
-            (double)expected->z,
-            (double)expected->w
-        );
-        return 0;
-    }
-
-    return 1;
-}
-
-/*
- * Independent reference using double intermediates.
- *
- * This deliberately does not call the production scalar function.
- */
 static void matrix_mul_reference(
     n64psp_mat4f* out,
     const n64psp_mat4f* a,
@@ -180,56 +187,87 @@ static void matrix_mul_reference(
     *out = result;
 }
 
-static void vector_transform_reference(
-    n64psp_vec4f* out,
-    const n64psp_mat4f* matrix,
-    const n64psp_vec4f* input
+static int run_chain_case(
+    const n64psp_mat4f* first_matrix,
+    const n64psp_mat4f* second_matrix,
+    const n64psp_vec4f* input,
+    size_t count
 ) {
-    const double x = (double)input->x;
-    const double y = (double)input->y;
-    const double z = (double)input->z;
-    const double w = (double)input->w;
+    n64psp_vec4f_pair actual[MAX_BATCH_COUNT];
+    size_t index;
 
-    n64psp_vec4f result;
+    CHECK(count <= MAX_BATCH_COUNT);
 
-    result.x = (float)(
-        (double)matrix->m[0][0] * x +
-        (double)matrix->m[1][0] * y +
-        (double)matrix->m[2][0] * z +
-        (double)matrix->m[3][0] * w
+    n64psp_mat4f_transform_vec4_chain2_batch(
+        actual,
+        first_matrix,
+        second_matrix,
+        input,
+        count
     );
 
-    result.y = (float)(
-        (double)matrix->m[0][1] * x +
-        (double)matrix->m[1][1] * y +
-        (double)matrix->m[2][1] * z +
-        (double)matrix->m[3][1] * w
-    );
+    for (index = 0; index < count; ++index) {
+        n64psp_vec4f_pair expected;
 
-    result.z = (float)(
-        (double)matrix->m[0][2] * x +
-        (double)matrix->m[1][2] * y +
-        (double)matrix->m[2][2] * z +
-        (double)matrix->m[3][2] * w
-    );
+        n64psp_mat4f_transform_vec4(
+            &expected.first,
+            first_matrix,
+            &input[index]
+        );
 
-    result.w = (float)(
-        (double)matrix->m[0][3] * x +
-        (double)matrix->m[1][3] * y +
-        (double)matrix->m[2][3] * z +
-        (double)matrix->m[3][3] * w
-    );
+        n64psp_mat4f_transform_vec4(
+            &expected.second,
+            second_matrix,
+            &expected.first
+        );
 
-    *out = result;
+        CHECK(pair_equal(&actual[index], &expected));
+    }
+
+    return 0;
 }
 
-static int pair_equal(
-    const n64psp_vec4f_pair* actual,
-    const n64psp_vec4f_pair* expected
+static int run_precompose_experiment_case(
+    const n64psp_mat4f* first_matrix,
+    const n64psp_mat4f* second_matrix,
+    const n64psp_vec4f* input,
+    size_t count
 ) {
-    return
-        vector_equal(&actual->first, &expected->first) &&
-        vector_equal(&actual->second, &expected->second);
+    n64psp_vec4f_pair actual[MAX_BATCH_COUNT];
+    n64psp_mat4f combined;
+    size_t index;
+
+    CHECK(count <= MAX_BATCH_COUNT);
+
+    n64psp_mat4f_transform_vec4_precompose_2mat_batch_experimental(
+        actual,
+        first_matrix,
+        second_matrix,
+        input,
+        count
+    );
+
+    n64psp_mat4f_mul(&combined, second_matrix, first_matrix);
+
+    for (index = 0; index < count; ++index) {
+        n64psp_vec4f_pair expected;
+
+        n64psp_mat4f_transform_vec4(
+            &expected.first,
+            first_matrix,
+            &input[index]
+        );
+
+        n64psp_mat4f_transform_vec4(
+            &expected.second,
+            &combined,
+            &input[index]
+        );
+
+        CHECK(pair_equal(&actual[index], &expected));
+    }
+
+    return 0;
 }
 
 static int test_layout_and_alignment(void) {
@@ -248,137 +286,7 @@ static int test_layout_and_alignment(void) {
     return 0;
 }
 
-static int run_batch_case(
-    const n64psp_mat4f* first_matrix,
-    const n64psp_mat4f* second_matrix,
-    const n64psp_vec4f* input,
-    size_t count
-) {
-    n64psp_vec4f_pair actual[64];
-    n64psp_vec4f_pair expected[64];
-    size_t index;
-
-    CHECK(count <= 64u);
-
-    for (index = 0; index < count; ++index) {
-        vector_transform_reference(
-            &expected[index].first,
-            first_matrix,
-            &input[index]
-        );
-
-        vector_transform_reference(
-            &expected[index].second,
-            second_matrix,
-            &input[index]
-        );
-    }
-
-    n64psp_mat4f_transform_vec4_2mat_batch(
-        actual,
-        first_matrix,
-        second_matrix,
-        input,
-        count
-    );
-
-    for (index = 0; index < count; ++index) {
-        n64psp_vec4f single_first;
-        n64psp_vec4f single_second;
-
-        CHECK(pair_equal(&actual[index], &expected[index]));
-
-        n64psp_mat4f_transform_vec4(
-            &single_first,
-            first_matrix,
-            &input[index]
-        );
-
-        n64psp_mat4f_transform_vec4(
-            &single_second,
-            second_matrix,
-            &input[index]
-        );
-
-        CHECK(vector_equal(&actual[index].first, &single_first));
-        CHECK(vector_equal(&actual[index].second, &single_second));
-    }
-
-    return 0;
-}
-
-static int test_identity(void) {
-    static const float rows[4][4] = {
-        {1.0f, 2.0f, 3.0f, 4.0f},
-        {5.0f, 6.0f, 7.0f, 8.0f},
-        {9.0f, 10.0f, 11.0f, 12.0f},
-        {13.0f, 14.0f, 15.0f, 16.0f},
-    };
-
-    const n64psp_mat4f identity = identity_matrix();
-    const n64psp_mat4f matrix = matrix_from_rows(rows);
-    n64psp_mat4f result;
-
-    n64psp_mat4f_mul(&result, &identity, &matrix);
-    CHECK(matrix_equal(&result, &matrix));
-
-    n64psp_mat4f_mul(&result, &matrix, &identity);
-    CHECK(matrix_equal(&result, &matrix));
-
-    return 0;
-}
-
-static int test_transform_and_composition(void) {
-    static const float scale_rows[4][4] = {
-        {2.0f, 0.0f, 0.0f, 0.0f},
-        {0.0f, 3.0f, 0.0f, 0.0f},
-        {0.0f, 0.0f, 4.0f, 0.0f},
-        {0.0f, 0.0f, 0.0f, 1.0f},
-    };
-
-    static const float translation_rows[4][4] = {
-        {1.0f, 0.0f, 0.0f, 10.0f},
-        {0.0f, 1.0f, 0.0f, 20.0f},
-        {0.0f, 0.0f, 1.0f, 30.0f},
-        {0.0f, 0.0f, 0.0f, 1.0f},
-    };
-
-    const n64psp_mat4f scale = matrix_from_rows(scale_rows);
-    const n64psp_mat4f translation =
-        matrix_from_rows(translation_rows);
-
-    const n64psp_vec4f input = {
-        1.0f,
-        2.0f,
-        3.0f,
-        1.0f,
-    };
-
-    const n64psp_vec4f expected = {
-        12.0f,
-        26.0f,
-        42.0f,
-        1.0f,
-    };
-
-    n64psp_mat4f combined;
-    n64psp_vec4f output;
-
-    // Translation * scale applies scale first, then translation
-    n64psp_mat4f_mul(&combined, &translation, &scale);
-    n64psp_mat4f_transform_vec4(&output, &combined, &input);
-
-    CHECK(vector_equal(&output, &expected));
-
-    output = input;
-    n64psp_mat4f_transform_vec4(&output, &combined, &output);
-
-    CHECK(vector_equal(&output, &expected));
-
-    return 0;
-}
-
-static int test_arbitrary_and_aliasing(void) {
+static int test_matrix_multiply_and_transform(void) {
     static const float a_rows[4][4] = {
         {1.0f, -2.0f, 3.5f, 4.0f},
         {5.25f, 6.0f, -7.0f, 8.0f},
@@ -395,15 +303,13 @@ static int test_arbitrary_and_aliasing(void) {
 
     const n64psp_mat4f a = matrix_from_rows(a_rows);
     const n64psp_mat4f b = matrix_from_rows(b_rows);
-
     n64psp_mat4f expected;
-    n64psp_mat4f result;
+    n64psp_mat4f actual;
     n64psp_mat4f alias;
 
     matrix_mul_reference(&expected, &a, &b);
-
-    n64psp_mat4f_mul(&result, &a, &b);
-    CHECK(matrix_equal(&result, &expected));
+    n64psp_mat4f_mul(&actual, &a, &b);
+    CHECK(matrix_equal(&actual, &expected));
 
     alias = a;
     n64psp_mat4f_mul(&alias, &alias, &b);
@@ -416,59 +322,104 @@ static int test_arbitrary_and_aliasing(void) {
     return 0;
 }
 
-static uint32_t random_state = 0x4e363450u;
 
-static float next_random_float(void) {
-    random_state =
-        random_state * 1664525u +
-        1013904223u;
+static uint32_t matrix_random_state = UINT32_C(0x13579bdf);
+
+static float next_matrix_random_float(void) {
+    matrix_random_state =
+        matrix_random_state * UINT32_C(1664525) +
+        UINT32_C(1013904223);
 
     return
-        ((float)((random_state >> 8) & 0xffffu) / 8192.0f) -
+        ((float)((matrix_random_state >> 8) & UINT32_C(0xffff)) / 8192.0f) -
         4.0f;
 }
 
-static int test_random_matrices(void) {
+static int test_random_matrix_multiply(void) {
     int iteration;
+
+    matrix_random_state = UINT32_C(0x13579bdf);
 
     for (iteration = 0; iteration < 1000; ++iteration) {
         n64psp_mat4f a;
         n64psp_mat4f b;
         n64psp_mat4f expected;
         n64psp_mat4f actual;
-
         size_t column;
         size_t row;
 
         for (column = 0; column < 4; ++column) {
             for (row = 0; row < 4; ++row) {
-                a.m[column][row] = next_random_float();
-                b.m[column][row] = next_random_float();
+                a.m[column][row] = next_matrix_random_float();
+                b.m[column][row] = next_matrix_random_float();
             }
         }
 
         matrix_mul_reference(&expected, &a, &b);
         n64psp_mat4f_mul(&actual, &a, &b);
-
         CHECK(matrix_equal(&actual, &expected));
     }
 
     return 0;
 }
 
-static int test_batch_zero_count(void) {
-    n64psp_mat4f_transform_vec4_2mat_batch(
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        0
-    );
+static int test_extreme_finite_values(void) {
+    const n64psp_mat4f identity = identity_matrix();
+    n64psp_mat4f matrix = identity_matrix();
+    n64psp_mat4f result;
+
+    matrix.m[0][0] = 1.0e20f;
+    matrix.m[1][1] = -1.0e-20f;
+    matrix.m[2][2] = 123456.0f;
+    matrix.m[3][0] = -98765.0f;
+
+    n64psp_mat4f_mul(&result, &identity, &matrix);
+    CHECK(matrix_equal(&result, &matrix));
 
     return 0;
 }
 
-static int test_batch_known_values(void) {
+static int run_independent_case(
+    const n64psp_mat4f* first_matrix,
+    const n64psp_mat4f* second_matrix,
+    const n64psp_vec4f* input,
+    size_t count
+) {
+    n64psp_vec4f_pair actual[MAX_BATCH_COUNT];
+    size_t index;
+
+    CHECK(count <= MAX_BATCH_COUNT);
+
+    n64psp_mat4f_transform_vec4_2mat_batch(
+        actual,
+        first_matrix,
+        second_matrix,
+        input,
+        count
+    );
+
+    for (index = 0; index < count; ++index) {
+        n64psp_vec4f_pair expected;
+
+        n64psp_mat4f_transform_vec4(
+            &expected.first,
+            first_matrix,
+            &input[index]
+        );
+
+        n64psp_mat4f_transform_vec4(
+            &expected.second,
+            second_matrix,
+            &input[index]
+        );
+
+        CHECK(pair_equal(&actual[index], &expected));
+    }
+
+    return 0;
+}
+
+static int test_independent_api_unchanged(void) {
     static const float scale_rows[4][4] = {
         {2.0f, 0.0f, 0.0f, 0.0f},
         {0.0f, 3.0f, 0.0f, 0.0f},
@@ -484,251 +435,219 @@ static int test_batch_known_values(void) {
     };
 
     const n64psp_mat4f scale = matrix_from_rows(scale_rows);
-    const n64psp_mat4f translation =
-        matrix_from_rows(translation_rows);
-
-    const n64psp_vec4f input[] = {
-        {1.0f, 2.0f, 3.0f, 1.0f},
-        {-2.0f, 0.5f, 4.0f, 1.0f},
-        {3.25f, -1.5f, 0.75f, 2.0f},
-        {-0.25f, -2.5f, 8.0f, 0.5f},
-    };
-
-    n64psp_vec4f_pair output[4];
+    const n64psp_mat4f translation = matrix_from_rows(translation_rows);
+    const n64psp_vec4f input = {1.0f, 2.0f, 3.0f, 1.0f};
+    n64psp_vec4f_pair output;
 
     n64psp_mat4f_transform_vec4_2mat_batch(
-        output,
+        &output,
         &scale,
         &translation,
-        input,
-        4
+        &input,
+        1
     );
 
     CHECK(vector_equal(
-        &output[0].first,
+        &output.first,
         &(n64psp_vec4f){2.0f, 6.0f, 12.0f, 1.0f}
     ));
 
     CHECK(vector_equal(
-        &output[0].second,
+        &output.second,
         &(n64psp_vec4f){11.0f, 22.0f, 33.0f, 1.0f}
     ));
 
-    CHECK(run_batch_case(
-        &scale,
-        &translation,
+    return 0;
+}
+
+
+static uint32_t random_state = UINT32_C(0x4e363450);
+
+static float next_random_float(void) {
+    random_state = random_state * UINT32_C(1664525) + UINT32_C(1013904223);
+
+    return
+        ((float)((random_state >> 8) & UINT32_C(0xffff)) / 8192.0f) -
+        4.0f;
+}
+
+
+static int test_independent_batch_regression(void) {
+    static const float first_rows[4][4] = {
+        {1.25f, -2.5f, 3.75f, 4.5f},
+        {5.5f, 6.25f, -7.75f, 8.0f},
+        {-9.5f, 10.0f, 11.25f, -12.5f},
+        {13.75f, -14.25f, 15.5f, 16.0f},
+    };
+
+    static const float second_rows[4][4] = {
+        {-3.5f, 2.25f, 1.5f, 0.75f},
+        {4.25f, -5.5f, 6.75f, 7.25f},
+        {8.5f, 9.25f, -10.75f, 11.5f},
+        {12.25f, 13.5f, 14.75f, -15.25f},
+    };
+
+    const n64psp_mat4f first_matrix = matrix_from_rows(first_rows);
+    const n64psp_mat4f second_matrix = matrix_from_rows(second_rows);
+    n64psp_vec4f input[MAX_BATCH_COUNT];
+    size_t index;
+
+    random_state = UINT32_C(0x2468ace0);
+
+    for (index = 0; index < MAX_BATCH_COUNT; ++index) {
+        input[index].x = next_random_float();
+        input[index].y = next_random_float();
+        input[index].z = next_random_float();
+        input[index].w = next_random_float();
+    }
+
+    CHECK(run_independent_case(
+        &first_matrix,
+        &second_matrix,
         input,
-        4
+        MAX_BATCH_COUNT
     ) == 0);
 
     return 0;
 }
 
-static int test_extreme_finite_values(void) {
-    const n64psp_mat4f identity = identity_matrix();
-
-    n64psp_mat4f matrix = identity_matrix();
-    n64psp_mat4f result;
-
-    matrix.m[0][0] = 1.0e20f;
-    matrix.m[1][1] = -1.0e-20f;
-    matrix.m[2][2] = 123456.0f;
-    matrix.m[3][0] = -98765.0f;
-
-    n64psp_mat4f_mul(&result, &identity, &matrix);
-
-    CHECK(matrix_equal(&result, &matrix));
+static int test_chain_zero_count(void) {
+    n64psp_mat4f_transform_vec4_chain2_batch(
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        0
+    );
 
     return 0;
 }
 
-static int test_batch_identity_and_equal_matrices(void) {
-    const n64psp_mat4f identity = identity_matrix();
+static int test_chain_semantic_distinction(void) {
+    static const float scale_rows[4][4] = {
+        {2.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 3.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 4.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 1.0f},
+    };
 
+    static const float translation_rows[4][4] = {
+        {1.0f, 0.0f, 0.0f, 10.0f},
+        {0.0f, 1.0f, 0.0f, 20.0f},
+        {0.0f, 0.0f, 1.0f, 30.0f},
+        {0.0f, 0.0f, 0.0f, 1.0f},
+    };
+
+    const n64psp_mat4f scale = matrix_from_rows(scale_rows);
+    const n64psp_mat4f translation = matrix_from_rows(translation_rows);
+    const n64psp_vec4f input = {1.0f, 2.0f, 3.0f, 1.0f};
+    n64psp_vec4f_pair chained;
+    n64psp_vec4f_pair independent;
+
+    n64psp_mat4f_transform_vec4_chain2_batch(
+        &chained,
+        &scale,
+        &translation,
+        &input,
+        1
+    );
+
+    n64psp_mat4f_transform_vec4_2mat_batch(
+        &independent,
+        &scale,
+        &translation,
+        &input,
+        1
+    );
+
+    CHECK(vector_equal(
+        &chained.first,
+        &(n64psp_vec4f){2.0f, 6.0f, 12.0f, 1.0f}
+    ));
+
+    CHECK(vector_equal(
+        &chained.second,
+        &(n64psp_vec4f){12.0f, 26.0f, 42.0f, 1.0f}
+    ));
+
+    CHECK(vector_equal(
+        &independent.second,
+        &(n64psp_vec4f){11.0f, 22.0f, 33.0f, 1.0f}
+    ));
+
+    CHECK(!nearly_equal(chained.second.x, independent.second.x));
+    CHECK(!nearly_equal(chained.second.y, independent.second.y));
+    CHECK(!nearly_equal(chained.second.z, independent.second.z));
+
+    return 0;
+}
+
+static int test_chain_identity_and_independent_equivalence(void) {
+    static const float arbitrary_rows[4][4] = {
+        {1.25f, -2.5f, 3.75f, 4.5f},
+        {5.5f, 6.25f, -7.75f, 8.0f},
+        {-9.5f, 10.0f, 11.25f, -12.5f},
+        {13.75f, -14.25f, 15.5f, 16.0f},
+    };
+
+    const n64psp_mat4f identity = identity_matrix();
+    const n64psp_mat4f arbitrary = matrix_from_rows(arbitrary_rows);
     const n64psp_vec4f input[] = {
         {1.0f, 2.0f, 3.0f, 1.0f},
         {-4.0f, 5.5f, -6.25f, 2.0f},
         {0.0f, -1.0f, 0.5f, 0.25f},
     };
 
-    n64psp_vec4f_pair output[3];
+    n64psp_vec4f_pair chained[3];
+    n64psp_vec4f_pair independent[3];
     size_t index;
 
+    CHECK(run_chain_case(&identity, &identity, input, 3) == 0);
+    CHECK(run_chain_case(&identity, &arbitrary, input, 3) == 0);
+
+    n64psp_mat4f_transform_vec4_chain2_batch(
+        chained,
+        &identity,
+        &arbitrary,
+        input,
+        3
+    );
+
     n64psp_mat4f_transform_vec4_2mat_batch(
-        output,
+        independent,
         &identity,
-        &identity,
+        &arbitrary,
         input,
         3
     );
 
     for (index = 0; index < 3; ++index) {
-        CHECK(vector_equal(&output[index].first, &input[index]));
-        CHECK(vector_equal(&output[index].second, &input[index]));
-    }
-
-    CHECK(run_batch_case(
-        &identity,
-        &identity,
-        input,
-        3
-    ) == 0);
-
-    return 0;
-}
-
-static int test_batch_canaries(void) {
-    const uint32_t input_canary = UINT32_C(0xa5a5a5a5);
-    const uint32_t output_canary = UINT32_C(0x5a5a5a5a);
-
-    const n64psp_mat4f identity = identity_matrix();
-
-    guarded_batch_input input;
-    guarded_batch_input input_before;
-    guarded_batch_output output;
-
-    size_t index;
-    size_t word;
-
-    for (word = 0; word < BATCH_CANARY_WORDS; ++word) {
-        input.before[word] = input_canary;
-        input.after[word] = input_canary;
-
-        output.before[word] = output_canary;
-        output.after[word] = output_canary;
-    }
-
-    for (index = 0; index < BATCH_GUARDED_COUNT; ++index) {
-        input.values[index].x = (float)index + 0.25f;
-        input.values[index].y = (float)index - 1.5f;
-        input.values[index].z = -(float)index * 0.5f;
-        input.values[index].w = 1.0f;
-
-        output.values[index].first =
-            (n64psp_vec4f){99.0f, 99.0f, 99.0f, 99.0f};
-
-        output.values[index].second =
-            (n64psp_vec4f){99.0f, 99.0f, 99.0f, 99.0f};
-    }
-
-    input_before = input;
-
-    n64psp_mat4f_transform_vec4_2mat_batch(
-        output.values,
-        &identity,
-        &identity,
-        input.values,
-        4
-    );
-
-    for (word = 0; word < BATCH_CANARY_WORDS; ++word) {
-        CHECK(input.before[word] == input_canary);
-        CHECK(input.after[word] == input_canary);
-        CHECK(output.before[word] == output_canary);
-        CHECK(output.after[word] == output_canary);
-    }
-
-    for (index = 0; index < BATCH_GUARDED_COUNT; ++index) {
-        CHECK(vector_equal(
-            &input.values[index],
-            &input_before.values[index]
-        ));
-    }
-
-    for (index = 0; index < 4; ++index) {
-        CHECK(vector_equal(
-            &output.values[index].first,
-            &input.values[index]
-        ));
-
-        CHECK(vector_equal(
-            &output.values[index].second,
-            &input.values[index]
-        ));
-    }
-
-    for (index = 4; index < BATCH_GUARDED_COUNT; ++index) {
-        const n64psp_vec4f untouched = {
-            99.0f,
-            99.0f,
-            99.0f,
-            99.0f,
-        };
-
-        CHECK(vector_equal(
-            &output.values[index].first,
-            &untouched
-        ));
-
-        CHECK(vector_equal(
-            &output.values[index].second,
-            &untouched
-        ));
+        CHECK(pair_equal(&chained[index], &independent[index]));
     }
 
     return 0;
 }
 
-static int test_batch_arbitrary_matrices(void) {
+static int test_chain_multiple_matrix_shapes(void) {
+    static const float scale_rows[4][4] = {
+        {-2.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 0.5f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 3.25f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 1.0f},
+    };
+
+    static const float translation_rows[4][4] = {
+        {1.0f, 0.0f, 0.0f, -7.5f},
+        {0.0f, 1.0f, 0.0f, 2.25f},
+        {0.0f, 0.0f, 1.0f, 11.0f},
+        {0.0f, 0.0f, 0.0f, 1.0f},
+    };
+
     static const float rotation_rows[4][4] = {
         {0.0f, -1.0f, 0.0f, 0.0f},
-        {1.0f,  0.0f, 0.0f, 0.0f},
-        {0.0f,  0.0f, 1.0f, 0.0f},
-        {0.0f,  0.0f, 0.0f, 1.0f},
-    };
-
-    static const float projection_rows[4][4] = {
-        {1.25f, 0.0f,  0.0f,  0.0f},
-        {0.0f,  1.75f, 0.0f,  0.0f},
-        {0.0f,  0.0f, -1.1f, -0.2f},
-        {0.0f,  0.0f, -1.0f,  0.0f},
-    };
-
-    static const float asymmetric_rows[4][4] = {
-        {1.0f,  2.0f,  3.0f,  4.0f},
-        {-5.0f, 6.5f, -7.0f,  8.0f},
-        {9.0f, -10.0f, 11.25f, -12.0f},
-        {13.0f, 14.0f, -15.0f, 16.5f},
-    };
-
-    const n64psp_mat4f rotation =
-        matrix_from_rows(rotation_rows);
-
-    const n64psp_mat4f projection =
-        matrix_from_rows(projection_rows);
-
-    const n64psp_mat4f asymmetric =
-        matrix_from_rows(asymmetric_rows);
-
-    const n64psp_vec4f input[] = {
-        {1.0f, 2.0f, -3.0f, 1.0f},
-        {-0.5f, 4.25f, 2.0f, 0.75f},
-        {7.0f, -8.0f, 9.0f, 2.0f},
-    };
-
-    CHECK(run_batch_case(
-        &rotation,
-        &projection,
-        input,
-        3
-    ) == 0);
-
-    CHECK(run_batch_case(
-        &asymmetric,
-        &rotation,
-        input,
-        3
-    ) == 0);
-
-    return 0;
-}
-
-static int test_batch_projection_modelview(void) {
-    static const float modelview_rows[4][4] = {
-        {0.0f, -1.0f, 0.0f, 10.0f},
-        {1.0f,  0.0f, 0.0f, 20.0f},
-        {0.0f,  0.0f, 1.0f, 30.0f},
-        {0.0f,  0.0f, 0.0f, 1.0f},
+        {1.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 1.0f},
     };
 
     static const float projection_rows[4][4] = {
@@ -738,66 +657,214 @@ static int test_batch_projection_modelview(void) {
         {0.0f, 0.0f, -1.0f, 0.0f},
     };
 
-    const n64psp_mat4f modelview =
-        matrix_from_rows(modelview_rows);
-
-    const n64psp_mat4f projection =
-        matrix_from_rows(projection_rows);
-
-    const n64psp_vec4f input = {
-        1.0f,
-        2.0f,
-        3.0f,
-        1.0f,
+    static const float arbitrary_rows[4][4] = {
+        {1.0f, 2.0f, 3.0f, 4.0f},
+        {-5.0f, 6.5f, -7.0f, 8.0f},
+        {9.0f, -10.0f, 11.25f, -12.0f},
+        {13.0f, 14.0f, -15.0f, 16.5f},
     };
 
-    n64psp_mat4f projection_modelview;
-    n64psp_vec4f_pair pair;
-    n64psp_vec4f expected_first;
-    n64psp_vec4f expected_second;
+    const n64psp_mat4f scale = matrix_from_rows(scale_rows);
+    const n64psp_mat4f translation = matrix_from_rows(translation_rows);
+    const n64psp_mat4f rotation = matrix_from_rows(rotation_rows);
+    const n64psp_mat4f projection = matrix_from_rows(projection_rows);
+    const n64psp_mat4f arbitrary = matrix_from_rows(arbitrary_rows);
 
-    n64psp_mat4f_mul(
-        &projection_modelview,
-        &projection,
-        &modelview
-    );
+    const n64psp_vec4f input[] = {
+        {1.0f, 2.0f, -3.0f, 1.0f},
+        {-0.5f, 4.25f, 2.0f, 0.75f},
+        {7.0f, -8.0f, 9.0f, 2.0f},
+        {-2.75f, 0.125f, -0.5f, -1.25f},
+    };
 
-    n64psp_mat4f_transform_vec4_2mat_batch(
-        &pair,
-        &modelview,
-        &projection_modelview,
-        &input,
-        1
-    );
-
-    vector_transform_reference(
-        &expected_first,
-        &modelview,
-        &input
-    );
-
-    vector_transform_reference(
-        &expected_second,
-        &projection,
-        &expected_first
-    );
-
-    CHECK(vector_equal(&pair.first, &expected_first));
-    CHECK(vector_equal(&pair.second, &expected_second));
+    CHECK(run_chain_case(&scale, &translation, input, 4) == 0);
+    CHECK(run_chain_case(&translation, &projection, input, 4) == 0);
+    CHECK(run_chain_case(&rotation, &projection, input, 4) == 0);
+    CHECK(run_chain_case(&arbitrary, &rotation, input, 4) == 0);
+    CHECK(run_chain_case(&arbitrary, &arbitrary, input, 4) == 0);
 
     return 0;
 }
 
-static int test_batch_random_vectors(void) {
+static int test_chain_projection_modelview_order(void) {
+    static const float modelview_rows[4][4] = {
+        {0.0f, -1.0f, 0.0f, 10.0f},
+        {1.0f, 0.0f, 0.0f, 20.0f},
+        {0.0f, 0.0f, 1.0f, 30.0f},
+        {0.0f, 0.0f, 0.0f, 1.0f},
+    };
+
+    static const float projection_rows[4][4] = {
+        {1.5f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 2.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, -1.25f, -0.5f},
+        {0.0f, 0.0f, -1.0f, 0.0f},
+    };
+
+    const n64psp_mat4f modelview = matrix_from_rows(modelview_rows);
+    const n64psp_mat4f projection = matrix_from_rows(projection_rows);
+    const n64psp_vec4f input[] = {
+        {1.0f, 2.0f, 3.0f, 1.0f},
+        {-2.0f, 1.5f, -6.0f, 1.0f},
+    };
+
+    n64psp_vec4f_pair chained[2];
+    n64psp_vec4f_pair precomposed[2];
+
+    n64psp_mat4f_transform_vec4_chain2_batch(
+        chained,
+        &modelview,
+        &projection,
+        input,
+        2
+    );
+
+    n64psp_mat4f_transform_vec4_precompose_2mat_batch_experimental(
+        precomposed,
+        &modelview,
+        &projection,
+        input,
+        2
+    );
+
+    CHECK(run_chain_case(&modelview, &projection, input, 2) == 0);
+    CHECK(run_precompose_experiment_case(
+        &modelview,
+        &projection,
+        input,
+        2
+    ) == 0);
+    CHECK(vector_equal(&chained[0].first, &precomposed[0].first));
+
+    return 0;
+}
+
+static int test_precompose_experiment_rounding_scope(void) {
+    static const float first_rows[4][4] = {
+        {10000.0f, 1000.0f, 0.0001f, 2.0f},
+        {1.0f, 1.25f, -3.5f, -2.0f},
+        {-0.25f, -1000.0f, 3.5f, -100000.0f},
+        {-0.25f, -100.0f, 100000.0f, -1.25f},
+    };
+
+    static const float second_rows[4][4] = {
+        {0.5f, -0.5f, 2.0f, 1.25f},
+        {-0.0001f, 0.001f, -100.0f, 3.5f},
+        {10000.0f, 0.1f, -100.0f, -0.1f},
+        {-0.1f, 1000.0f, -0.001f, 0.5f},
+    };
+
+    const n64psp_mat4f first_matrix = matrix_from_rows(first_rows);
+    const n64psp_mat4f second_matrix = matrix_from_rows(second_rows);
+    const n64psp_vec4f input = {0.001f, 2.0f, -100.0f, 2.0f};
+    n64psp_vec4f_pair chained;
+    n64psp_vec4f_pair precomposed;
+
+    n64psp_mat4f_transform_vec4_chain2_batch(
+        &chained,
+        &first_matrix,
+        &second_matrix,
+        &input,
+        1
+    );
+
+    n64psp_mat4f_transform_vec4_precompose_2mat_batch_experimental(
+        &precomposed,
+        &first_matrix,
+        &second_matrix,
+        &input,
+        1
+    );
+
+    CHECK(run_chain_case(&first_matrix, &second_matrix, &input, 1) == 0);
+    CHECK(run_precompose_experiment_case(
+        &first_matrix,
+        &second_matrix,
+        &input,
+        1
+    ) == 0);
+
+    CHECK(vector_equal(&chained.first, &precomposed.first));
+    CHECK(vector_equal(&chained.second, &precomposed.second));
+    CHECK(memcmp(
+        &chained.second,
+        &precomposed.second,
+        sizeof(chained.second)
+    ) != 0);
+
+    return 0;
+}
+
+static int test_chain_canaries(void) {
+    const uint32_t input_canary = UINT32_C(0xa5a5a5a5);
+    const uint32_t output_canary = UINT32_C(0x5a5a5a5a);
+    const n64psp_mat4f identity = identity_matrix();
+    guarded_input input;
+    guarded_input input_before;
+    guarded_output output;
+    const n64psp_vec4f untouched = {99.0f, 99.0f, 99.0f, 99.0f};
+    size_t word;
+    size_t index;
+
+    for (word = 0; word < CANARY_WORDS; ++word) {
+        input.before[word] = input_canary;
+        input.after[word] = input_canary;
+        output.before[word] = output_canary;
+        output.after[word] = output_canary;
+    }
+
+    for (index = 0; index < GUARDED_COUNT; ++index) {
+        input.values[index] = (n64psp_vec4f){
+            (float)index + 0.25f,
+            (float)index - 1.5f,
+            -(float)index * 0.5f,
+            1.0f,
+        };
+        output.values[index].first = untouched;
+        output.values[index].second = untouched;
+    }
+
+    input_before = input;
+
+    n64psp_mat4f_transform_vec4_chain2_batch(
+        output.values,
+        &identity,
+        &identity,
+        input.values,
+        4
+    );
+
+    for (word = 0; word < CANARY_WORDS; ++word) {
+        CHECK(input.before[word] == input_canary);
+        CHECK(input.after[word] == input_canary);
+        CHECK(output.before[word] == output_canary);
+        CHECK(output.after[word] == output_canary);
+    }
+
+    CHECK(memcmp(&input, &input_before, sizeof(input)) == 0);
+
+    for (index = 0; index < 4; ++index) {
+        CHECK(vector_equal(&output.values[index].first, &input.values[index]));
+        CHECK(vector_equal(&output.values[index].second, &input.values[index]));
+    }
+
+    for (index = 4; index < GUARDED_COUNT; ++index) {
+        CHECK(vector_equal(&output.values[index].first, &untouched));
+        CHECK(vector_equal(&output.values[index].second, &untouched));
+    }
+
+    return 0;
+}
+
+static int test_chain_random_vectors(void) {
     n64psp_mat4f first_matrix;
     n64psp_mat4f second_matrix;
-    n64psp_vec4f input[64];
-
+    n64psp_vec4f input[MAX_BATCH_COUNT];
     size_t column;
     size_t row;
     size_t index;
 
-    random_state = 0x4e363450u;
+    random_state = UINT32_C(0x4e363450);
 
     for (column = 0; column < 4; ++column) {
         for (row = 0; row < 4; ++row) {
@@ -806,39 +873,107 @@ static int test_batch_random_vectors(void) {
         }
     }
 
-    for (index = 0; index < 64; ++index) {
+    for (index = 0; index < MAX_BATCH_COUNT; ++index) {
         input[index].x = next_random_float();
         input[index].y = next_random_float();
         input[index].z = next_random_float();
         input[index].w = next_random_float();
     }
 
-    CHECK(run_batch_case(
+    CHECK(run_chain_case(
         &first_matrix,
         &second_matrix,
         input,
-        64
+        MAX_BATCH_COUNT
     ) == 0);
+
+    return 0;
+}
+
+static int test_batch_count_coverage(void) {
+    static const size_t counts[] = {
+        0u,
+        1u,
+        2u,
+        3u,
+        4u,
+        8u,
+        16u,
+        31u,
+        32u,
+        63u,
+        64u,
+    };
+
+    static const float first_rows[4][4] = {
+        {1.25f, -2.5f, 3.75f, 4.5f},
+        {5.5f, 6.25f, -7.75f, 8.0f},
+        {-9.5f, 10.0f, 11.25f, -12.5f},
+        {13.75f, -14.25f, 15.5f, 16.0f},
+    };
+
+    static const float second_rows[4][4] = {
+        {-3.5f, 2.25f, 1.5f, 0.75f},
+        {4.25f, -5.5f, 6.75f, 7.25f},
+        {8.5f, 9.25f, -10.75f, 11.5f},
+        {12.25f, 13.5f, 14.75f, -15.25f},
+    };
+
+    const n64psp_mat4f first_matrix = matrix_from_rows(first_rows);
+    const n64psp_mat4f second_matrix = matrix_from_rows(second_rows);
+    n64psp_vec4f input[MAX_BATCH_COUNT];
+    size_t count_index;
+    size_t index;
+
+    random_state = UINT32_C(0xabcdef01);
+
+    for (index = 0; index < MAX_BATCH_COUNT; ++index) {
+        input[index].x = next_random_float();
+        input[index].y = next_random_float();
+        input[index].z = next_random_float();
+        input[index].w = next_random_float();
+    }
+
+    for (
+        count_index = 0;
+        count_index < sizeof(counts) / sizeof(counts[0]);
+        ++count_index
+    ) {
+        CHECK(run_independent_case(
+            &first_matrix,
+            &second_matrix,
+            input,
+            counts[count_index]
+        ) == 0);
+
+        CHECK(run_chain_case(
+            &first_matrix,
+            &second_matrix,
+            input,
+            counts[count_index]
+        ) == 0);
+    }
 
     return 0;
 }
 
 int main(void) {
     CHECK(test_layout_and_alignment() == 0);
-
-    CHECK(test_identity() == 0);
-    CHECK(test_transform_and_composition() == 0);
-    CHECK(test_arbitrary_and_aliasing() == 0);
-    CHECK(test_random_matrices() == 0);
+    CHECK(test_matrix_multiply_and_transform() == 0);
+    CHECK(test_random_matrix_multiply() == 0);
     CHECK(test_extreme_finite_values() == 0);
+    CHECK(test_independent_api_unchanged() == 0);
+    CHECK(test_independent_batch_regression() == 0);
 
-    CHECK(test_batch_zero_count() == 0);
-    CHECK(test_batch_known_values() == 0);
-    CHECK(test_batch_identity_and_equal_matrices() == 0);
-    CHECK(test_batch_arbitrary_matrices() == 0);
-    CHECK(test_batch_projection_modelview() == 0);
-    CHECK(test_batch_random_vectors() == 0);
-    CHECK(test_batch_canaries() == 0);
+    CHECK(test_chain_zero_count() == 0);
+    CHECK(test_chain_semantic_distinction() == 0);
+    CHECK(test_chain_identity_and_independent_equivalence() == 0);
+    CHECK(test_chain_multiple_matrix_shapes() == 0);
+    CHECK(test_chain_projection_modelview_order() == 0);
+    CHECK(test_precompose_experiment_rounding_scope() == 0);
+    CHECK(test_chain_canaries() == 0);
+    CHECK(test_chain_random_vectors() == 0);
+    CHECK(test_batch_count_coverage() == 0);
 
     puts("n64psp math tests passed");
     return 0;

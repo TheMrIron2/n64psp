@@ -1,0 +1,4 @@
+d112c8ccb3c4d44364fca5140a8ae14576de19306f34ff980a24aea5b545f095  n64psp-vfpu-baseline/EBOOT.PBP
+1938bf3499713e4d20326cc5af08f39f9683205d2923ed44f2cc24bba504b16a  n64psp-vfpu-baseline/n64psp_psp_smoke.elf
+435a00ea4446526b38171bb650eef647b61ea01fdc8088aa2c7880c72835ed2d  n64psp-vfpu-experiment/EBOOT.PBP
+a6b273101479618045660694b45e3e4e0528e3b4043e48beebfd5814c8269fd9  n64psp-vfpu-experiment/n64psp_psp_smoke.elf

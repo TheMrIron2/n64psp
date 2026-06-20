@@ -1,0 +1,4 @@
+Install either artifact directory as ms0:/PSP/GAME/n64psp-vfpu-baseline or ms0:/PSP/GAME/n64psp-vfpu-experiment.
+Run on real PSP hardware, not PPSSPP for timing proof.
+Record the on-screen transform benchmark table for counts 1,2,3,4,8,16,31,32,63,64.
+Compare chain2 VFPU, independent VFPU, and precompose + independent VFPU rows plus metadata printed by the EBOOT.
