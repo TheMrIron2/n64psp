@@ -1,7 +1,9 @@
 #include "math_smoke.h"
 
+#include "../../src/math/lighting_internal.h"
 #include "../../src/math/math_internal.h"
 
+#include "n64psp/lighting.h"
 #include "n64psp/math.h"
 #include "n64psp/runtime.h"
 
@@ -32,12 +34,33 @@
 static volatile float math_benchmark_checksum;
 
 enum {
-    MATH_BATCH_MAX_COUNT = 64
+    MATH_BATCH_MAX_COUNT = 64,
+    LIGHTING_CANARY_WORDS = 4
 };
+
+typedef struct N64PSP_ALIGN16 lighting_normal_guard {
+    uint32_t before[LIGHTING_CANARY_WORDS];
+    n64psp_snorm8x4 values[MATH_BATCH_MAX_COUNT];
+    uint32_t after[LIGHTING_CANARY_WORDS];
+} lighting_normal_guard;
+
+typedef struct N64PSP_ALIGN16 lighting_output_guard {
+    uint32_t before[LIGHTING_CANARY_WORDS];
+    n64psp_vec4f values[MATH_BATCH_MAX_COUNT];
+    uint32_t after[LIGHTING_CANARY_WORDS];
+} lighting_output_guard;
 
 static n64psp_vec4f math_batch_input[MATH_BATCH_MAX_COUNT];
 static n64psp_vec4f_pair math_batch_scalar[MATH_BATCH_MAX_COUNT];
 static n64psp_vec4f_pair math_batch_selected[MATH_BATCH_MAX_COUNT];
+static lighting_normal_guard lighting_normals_guard;
+static lighting_output_guard lighting_scalar_guard;
+static lighting_output_guard lighting_selected_guard;
+static n64psp_directional_lightf lighting_lights[7];
+
+#define lighting_normals lighting_normals_guard.values
+#define lighting_scalar lighting_scalar_guard.values
+#define lighting_selected lighting_selected_guard.values
 #if defined(__PSP__) && N64PSP_USE_VFPU
 static n64psp_vec4f_pair math_batch_baseline[MATH_BATCH_MAX_COUNT];
 static n64psp_vec4f_pair math_batch_candidate[MATH_BATCH_MAX_COUNT];
@@ -113,6 +136,14 @@ static const char* selected_path_name(void) {
     return "chain2 VFPU";
 #else
     return "chain2 scalar";
+#endif
+}
+
+static const char* selected_lighting_path_name(void) {
+#if N64PSP_USE_VFPU
+    return "lighting PSP";
+#else
+    return "lighting scalar";
 #endif
 }
 
@@ -588,6 +619,280 @@ static int run_batch_correctness(void) {
     return 0;
 }
 
+static void initialize_lighting_inputs(void) {
+    unsigned int index;
+
+    for (index = 0u; index < LIGHTING_CANARY_WORDS; ++index) {
+        lighting_normals_guard.before[index] = 0x6c6e0000u + index;
+        lighting_normals_guard.after[index] = 0x6c6e1000u + index;
+        lighting_scalar_guard.before[index] = 0x6c730000u + index;
+        lighting_scalar_guard.after[index] = 0x6c731000u + index;
+        lighting_selected_guard.before[index] = 0x6c760000u + index;
+        lighting_selected_guard.after[index] = 0x6c761000u + index;
+    }
+
+    for (index = 0u; index < MATH_BATCH_MAX_COUNT; ++index) {
+        lighting_normals[index].x =
+            (int8_t)((int)(index * 17u) % 255 - 127);
+        lighting_normals[index].y =
+            (int8_t)((int)(index * 31u) % 255 - 127);
+        lighting_normals[index].z =
+            (int8_t)((int)(index * 47u) % 255 - 127);
+        lighting_normals[index].w = 0;
+        lighting_scalar[index].x = -9999.0f;
+        lighting_scalar[index].y = -9999.0f;
+        lighting_scalar[index].z = -9999.0f;
+        lighting_scalar[index].w = -9999.0f;
+        lighting_selected[index] = lighting_scalar[index];
+    }
+
+    lighting_normals[0].x = 0;
+    lighting_normals[0].y = 0;
+    lighting_normals[0].z = 0;
+    lighting_normals[1].x = 1;
+    lighting_normals[1].y = 2;
+    lighting_normals[1].z = 4;
+    lighting_normals[2].x = 127;
+    lighting_normals[2].y = 0;
+    lighting_normals[2].z = 0;
+    lighting_normals[3].x = 0;
+    lighting_normals[3].y = 127;
+    lighting_normals[3].z = 0;
+    lighting_normals[4].x = 73;
+    lighting_normals[4].y = 73;
+    lighting_normals[4].z = 73;
+
+    for (index = 0u; index < 7u; ++index) {
+        static const float directions[7][3] = {
+            {1.0f, 0.0f, 0.0f},
+            {0.0f, 1.0f, 0.0f},
+            {0.0f, 0.0f, 1.0f},
+            {-1.0f, 0.0f, 0.0f},
+            {0.5f, 0.75f, 0.4f},
+            {-0.5f, -0.25f, -0.8f},
+            {0.25f, -0.9f, 0.35f},
+        };
+        float x = directions[index][0];
+        float y = directions[index][1];
+        float z = directions[index][2];
+        float length = x * x + y * y + z * z;
+        float inverse_length = 1.0f;
+
+        if (length > 0.000001f) {
+            inverse_length = 1.0f / __builtin_sqrtf(length);
+        }
+
+        lighting_lights[index].direction.x = x * inverse_length;
+        lighting_lights[index].direction.y = y * inverse_length;
+        lighting_lights[index].direction.z = z * inverse_length;
+        lighting_lights[index].direction.w = 0.0f;
+        lighting_lights[index].color.x = 48.0f + (float)index * 37.0f;
+        lighting_lights[index].color.y = 12.0f + (float)index * 53.0f;
+        lighting_lights[index].color.z = 96.0f + (float)index * 71.0f;
+        lighting_lights[index].color.w = 0.0f;
+    }
+}
+
+static int check_lighting_canaries(void) {
+    unsigned int index;
+
+    for (index = 0u; index < LIGHTING_CANARY_WORDS; ++index) {
+        if ((lighting_normals_guard.before[index] != 0x6c6e0000u + index) ||
+            (lighting_normals_guard.after[index] != 0x6c6e1000u + index) ||
+            (lighting_scalar_guard.before[index] != 0x6c730000u + index) ||
+            (lighting_scalar_guard.after[index] != 0x6c731000u + index) ||
+            (lighting_selected_guard.before[index] != 0x6c760000u + index) ||
+            (lighting_selected_guard.after[index] != 0x6c761000u + index)) {
+            pspDebugScreenPrintf("lighting canary mismatch index=%u\n", index);
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static int compare_lighting_output(
+    const n64psp_vec4f* scalar,
+    const n64psp_vec4f* selected,
+    unsigned int count,
+    unsigned int light_count
+) {
+    unsigned int index;
+    unsigned int component;
+
+    for (index = 0u; index < count; ++index) {
+        for (component = 0u; component < 4u; ++component) {
+            const float scalar_value =
+                vector_component(&scalar[index], component);
+            const float selected_value =
+                vector_component(&selected[index], component);
+
+            if (!nearly_equal(selected_value, scalar_value)) {
+                pspDebugScreenPrintf(
+                    "lighting mismatch case=batched vertex=%u lights=%u component=%s\n",
+                    index,
+                    light_count,
+                    component_name(component)
+                );
+                pspDebugScreenPrintf(
+                    " normal=%d,%d,%d scalar=%g vfpu=%g absdiff=%g\n",
+                    (int)lighting_normals[index].x,
+                    (int)lighting_normals[index].y,
+                    (int)lighting_normals[index].z,
+                    (double)scalar_value,
+                    (double)selected_value,
+                    (double)absf_local(scalar_value - selected_value)
+                );
+                return 0;
+            }
+        }
+    }
+
+    return 1;
+}
+
+static int run_lighting_correctness(void) {
+    static const unsigned int counts[] = {
+        0u, 1u, 2u, 3u, 4u, 6u, 8u, 10u, 16u, 24u, 32u, 64u,
+    };
+    static const unsigned int light_counts[] = {
+        0u, 1u, 2u, 4u, 7u,
+    };
+    static const float identity_rows[4][4] = {
+        {1.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 1.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 1.0f},
+    };
+    static const float rotation_rows[4][4] = {
+        {0.0f, -1.0f, 0.0f, 0.0f},
+        {1.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 1.0f},
+    };
+    static const float scale_rows[4][4] = {
+        {2.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 0.5f, 0.0f, 0.0f},
+        {0.0f, 0.0f, -3.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 1.0f},
+    };
+    static const float tiny_rows[4][4] = {
+        {0.00000001f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 0.00000001f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 0.00000001f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 1.0f},
+    };
+    const n64psp_mat4f matrices[] = {
+        matrix_from_rows(identity_rows),
+        matrix_from_rows(rotation_rows),
+        matrix_from_rows(scale_rows),
+        matrix_from_rows(tiny_rows),
+    };
+    const n64psp_vec4f ambient = {12.0f, 24.0f, 36.0f, 0.0f};
+    unsigned int matrix_index;
+    unsigned int count_index;
+    unsigned int light_count_index;
+
+    initialize_lighting_inputs();
+
+    n64psp_directional_light_snorm8_batch_scalar(
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        0,
+        0
+    );
+    n64psp_directional_light_snorm8_batch(
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        0,
+        0
+    );
+
+    for (
+        matrix_index = 0u;
+        matrix_index < sizeof(matrices) / sizeof(matrices[0]);
+        ++matrix_index
+    ) {
+        for (
+            count_index = 0u;
+            count_index < sizeof(counts) / sizeof(counts[0]);
+            ++count_index
+        ) {
+            for (
+                light_count_index = 0u;
+                light_count_index < sizeof(light_counts) / sizeof(light_counts[0]);
+                ++light_count_index
+            ) {
+                const unsigned int count = counts[count_index];
+                const unsigned int light_count = light_counts[light_count_index];
+
+                if (count == 0u) {
+                    continue;
+                }
+
+                n64psp_directional_light_snorm8_batch_scalar(
+                    lighting_scalar,
+                    &matrices[matrix_index],
+                    lighting_normals,
+                    light_count != 0u ? lighting_lights : NULL,
+                    &ambient,
+                    light_count,
+                    count
+                );
+#if defined(__PSP__) && N64PSP_USE_VFPU
+                n64psp_directional_light_snorm8_batch_vfpu(
+                    lighting_selected,
+                    &matrices[matrix_index],
+                    lighting_normals,
+                    light_count != 0u ? lighting_lights : NULL,
+                    &ambient,
+                    light_count,
+                    count
+                );
+#else
+                n64psp_directional_light_snorm8_batch(
+                    lighting_selected,
+                    &matrices[matrix_index],
+                    lighting_normals,
+                    light_count != 0u ? lighting_lights : NULL,
+                    &ambient,
+                    light_count,
+                    count
+                );
+#endif
+
+                if (!compare_lighting_output(
+                        lighting_scalar,
+                        lighting_selected,
+                        count,
+                        light_count
+                    ) ||
+                    !check_lighting_canaries()) {
+                    pspDebugScreenPrintf(
+                        "lighting case matrix=%u count=%u lights=%u\n",
+                        matrix_index,
+                        count,
+                        light_count
+                    );
+                    return 1;
+                }
+            }
+        }
+    }
+
+    pspDebugScreenPrintf(
+        "lighting batches selected path: %s\n",
+        selected_lighting_path_name()
+    );
+    return 0;
+}
+
 static int matrix_equal(
     const n64psp_mat4f* actual,
     const n64psp_mat4f* expected,
@@ -835,8 +1140,10 @@ static void batch_benchmark_warmup(
 
     consume_batch(math_batch_scalar, MATH_BATCH_MAX_COUNT);
     consume_batch(math_batch_selected, MATH_BATCH_MAX_COUNT);
+#if defined(__PSP__) && N64PSP_USE_VFPU
     consume_batch(math_batch_baseline, MATH_BATCH_MAX_COUNT);
     consume_batch(math_batch_candidate, MATH_BATCH_MAX_COUNT);
+#endif
     consume_batch(math_batch_independent, MATH_BATCH_MAX_COUNT);
 }
 
@@ -1086,6 +1393,191 @@ static int run_batch_benchmark(void) {
     return 0;
 }
 
+static void consume_lighting_output(
+    const n64psp_vec4f* output,
+    unsigned int count
+) {
+    math_benchmark_checksum +=
+        output[count - 1u].x +
+        output[count - 1u].y +
+        output[count - 1u].z +
+        output[count - 1u].w;
+}
+
+static void lighting_benchmark_warmup(
+    const n64psp_mat4f* normal_matrix,
+    const n64psp_vec4f* ambient
+) {
+    unsigned int iteration;
+
+    for (iteration = 0u; iteration < 64u; ++iteration) {
+        n64psp_directional_light_snorm8_batch_scalar(
+            lighting_scalar,
+            normal_matrix,
+            lighting_normals,
+            lighting_lights,
+            ambient,
+            7u,
+            MATH_BATCH_MAX_COUNT
+        );
+
+#if defined(__PSP__) && N64PSP_USE_VFPU
+        n64psp_directional_light_snorm8_batch_vfpu(
+            lighting_selected,
+            normal_matrix,
+            lighting_normals,
+            lighting_lights,
+            ambient,
+            7u,
+            MATH_BATCH_MAX_COUNT
+        );
+#else
+        n64psp_directional_light_snorm8_batch(
+            lighting_selected,
+            normal_matrix,
+            lighting_normals,
+            lighting_lights,
+            ambient,
+            7u,
+            MATH_BATCH_MAX_COUNT
+        );
+#endif
+    }
+
+    consume_lighting_output(lighting_scalar, MATH_BATCH_MAX_COUNT);
+    consume_lighting_output(lighting_selected, MATH_BATCH_MAX_COUNT);
+}
+
+static int run_lighting_benchmark(void) {
+    static const unsigned int counts[] = {
+        1u, 2u, 3u, 4u, 6u, 8u, 10u, 16u, 24u, 32u,
+    };
+    static const unsigned int light_counts[] = {
+        0u, 1u, 2u, 4u, 7u,
+    };
+    static const float normal_rows[4][4] = {
+        {0.25f, -1.0f, 0.5f, 0.0f},
+        {1.5f, 0.5f, -0.25f, 0.0f},
+        {-0.75f, 0.25f, 1.25f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 1.0f},
+    };
+    const n64psp_mat4f normal_matrix = matrix_from_rows(normal_rows);
+    const n64psp_vec4f ambient = {12.0f, 24.0f, 36.0f, 0.0f};
+    unsigned int count_index;
+    unsigned int light_count_index;
+
+    initialize_lighting_inputs();
+    lighting_benchmark_warmup(&normal_matrix, &ambient);
+
+    pspDebugScreenPrintf(
+        "lighting benchmark git=%s vfpu=%d opt=%s selected=%s\n",
+        N64PSP_GIT_COMMIT,
+        N64PSP_USE_VFPU,
+        N64PSP_PSP_OPT_FLAGS,
+        selected_lighting_path_name()
+    );
+
+    for (
+        count_index = 0u;
+        count_index < sizeof(counts) / sizeof(counts[0]);
+        ++count_index
+    ) {
+        const unsigned int count = counts[count_index];
+        const uint32_t repetitions =
+            batch_benchmark_repetitions(count);
+
+        for (
+            light_count_index = 0u;
+            light_count_index < sizeof(light_counts) / sizeof(light_counts[0]);
+            ++light_count_index
+        ) {
+            const unsigned int light_count = light_counts[light_count_index];
+            const n64psp_directional_lightf* light_ptr =
+                light_count != 0u ? lighting_lights : NULL;
+            n64psp_time_us scalar_start;
+            n64psp_time_us scalar_end;
+            n64psp_time_us vfpu_start;
+            n64psp_time_us vfpu_end;
+            uint32_t iteration;
+
+            scalar_start = n64psp_time_monotonic_us();
+
+            for (iteration = 0u; iteration < repetitions; ++iteration) {
+                n64psp_directional_light_snorm8_batch_scalar(
+                    lighting_scalar,
+                    &normal_matrix,
+                    lighting_normals,
+                    light_ptr,
+                    &ambient,
+                    light_count,
+                    count
+                );
+            }
+
+            scalar_end = n64psp_time_monotonic_us();
+            consume_lighting_output(lighting_scalar, count);
+
+            vfpu_start = n64psp_time_monotonic_us();
+
+            for (iteration = 0u; iteration < repetitions; ++iteration) {
+#if defined(__PSP__) && N64PSP_USE_VFPU
+                n64psp_directional_light_snorm8_batch_vfpu(
+                    lighting_selected,
+                    &normal_matrix,
+                    lighting_normals,
+                    light_ptr,
+                    &ambient,
+                    light_count,
+                    count
+                );
+#else
+                n64psp_directional_light_snorm8_batch(
+                    lighting_selected,
+                    &normal_matrix,
+                    lighting_normals,
+                    light_ptr,
+                    &ambient,
+                    light_count,
+                    count
+                );
+#endif
+            }
+
+            vfpu_end = n64psp_time_monotonic_us();
+            consume_lighting_output(lighting_selected, count);
+
+            pspDebugScreenPrintf(
+                "lighting count=%u lights=%u reps=%lu\n",
+                count,
+                light_count,
+                (unsigned long)repetitions
+            );
+
+            print_batch_measurement(
+                "lighting scalar",
+                scalar_end - scalar_start,
+                repetitions,
+                count
+            );
+
+            print_batch_measurement(
+                selected_lighting_path_name(),
+                vfpu_end - vfpu_start,
+                repetitions,
+                count
+            );
+
+            print_ratio(
+                "lighting scalar / VFPU",
+                scalar_end - scalar_start,
+                vfpu_end - vfpu_start
+            );
+        }
+    }
+
+    return 0;
+}
+
 static void benchmark_warmup(
     const n64psp_mat4f* a,
     const n64psp_mat4f* b
@@ -1220,12 +1712,20 @@ int n64psp_psp_math_smoke(void) {
         return 1;
     }
 
+    if (run_lighting_correctness() != 0) {
+        return 1;
+    }
+
 #if N64PSP_PSP_BENCHMARKS
     if (run_math_benchmark() != 0) {
         return 1;
     }
 
     if (run_batch_benchmark() != 0) {
+        return 1;
+    }
+
+    if (run_lighting_benchmark() != 0) {
         return 1;
     }
 #endif

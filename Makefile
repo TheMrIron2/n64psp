@@ -32,7 +32,9 @@ COMMON_SOURCES := \
 
 MATH_SOURCES := \
 	src/math/math_api.c \
-	src/math/math_scalar.c
+	src/math/math_scalar.c \
+	src/math/lighting_api.c \
+	src/math/lighting_scalar.c
 
 PSP_PLATFORM_SOURCES := \
 	src/platform/psp/platform_psp.c
@@ -44,7 +46,8 @@ PSP_MATH_ASM_SOURCES :=
 
 ifeq ($(N64PSP_USE_VFPU),1)
 PSP_MATH_ASM_SOURCES += \
-	src/platform/psp/math_vfpu.S
+	src/platform/psp/math_vfpu.S \
+	src/platform/psp/lighting_vfpu.S
 endif
 
 PSP_RUNTIME_OBJECTS := \
@@ -123,6 +126,7 @@ PSP_LDFLAGS := \
 	-Wl,-zmax-page-size=128
 
 PSP_LDLIBS := \
+	-lm \
 	-lpspdebug \
 	-lpspdisplay \
 	-lpspge \
@@ -145,6 +149,9 @@ HOST_TEST_OBJECTS := \
 HOST_MATH_TEST_OBJECT := \
 	$(BUILD_HOST)/tests/test_math.o
 
+HOST_LIGHTING_TEST_OBJECT := \
+	$(BUILD_HOST)/tests/test_lighting.o
+
 HOST_SMOKE_OBJECTS := \
 	$(patsubst %.c,$(BUILD_HOST)/%.o,$(HOST_SOURCES) examples/host_smoke/main.c)
 
@@ -165,7 +172,7 @@ ifeq ($(N64PSP_QUEUE_COUNTERS),1)
 HOST_CFLAGS += -DN64PSP_QUEUE_COUNTERS=1
 endif
 
-HOST_LDLIBS := -pthread
+HOST_LDLIBS := -pthread -lm
 
 .PHONY: \
 	all \
@@ -174,6 +181,7 @@ HOST_LDLIBS := -pthread
 	test \
 	test-runtime \
 	test-math \
+	test-lighting \
 	smoke-host \
 	benchmark-host \
 	inspect-psp \
@@ -259,7 +267,16 @@ $(BUILD_HOST)/n64psp_math_tests: \
 	$(BUILD_HOST)/libn64psp_math.a
 	$(HOST_CC) -o $@ \
 		$(HOST_MATH_TEST_OBJECT) \
-		$(BUILD_HOST)/libn64psp_math.a
+		$(BUILD_HOST)/libn64psp_math.a \
+		$(HOST_LDLIBS)
+
+$(BUILD_HOST)/n64psp_lighting_tests: \
+	$(HOST_LIGHTING_TEST_OBJECT) \
+	$(BUILD_HOST)/libn64psp_math.a
+	$(HOST_CC) -o $@ \
+		$(HOST_LIGHTING_TEST_OBJECT) \
+		$(BUILD_HOST)/libn64psp_math.a \
+		$(HOST_LDLIBS)
 
 $(BUILD_HOST)/n64psp_host_smoke: $(HOST_SMOKE_OBJECTS)
 	$(HOST_CC) -o $@ $^ $(HOST_LDLIBS)
@@ -273,7 +290,10 @@ test-runtime: $(BUILD_HOST)/n64psp_tests
 test-math: $(BUILD_HOST)/n64psp_math_tests
 	./$(BUILD_HOST)/n64psp_math_tests
 
-test: test-runtime test-math
+test-lighting: $(BUILD_HOST)/n64psp_lighting_tests
+	./$(BUILD_HOST)/n64psp_lighting_tests
+
+test: test-runtime test-math test-lighting
 
 smoke-host: $(BUILD_HOST)/n64psp_host_smoke
 	./$(BUILD_HOST)/n64psp_host_smoke
