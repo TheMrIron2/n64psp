@@ -1,7 +1,9 @@
 #include "math_smoke.h"
 
+#include "../../src/math/lighting_internal.h"
 #include "../../src/math/math_internal.h"
 
+#include "n64psp/lighting.h"
 #include "n64psp/math.h"
 #include "n64psp/runtime.h"
 
@@ -38,6 +40,10 @@ enum {
 static n64psp_vec4f math_batch_input[MATH_BATCH_MAX_COUNT];
 static n64psp_vec4f_pair math_batch_scalar[MATH_BATCH_MAX_COUNT];
 static n64psp_vec4f_pair math_batch_selected[MATH_BATCH_MAX_COUNT];
+static n64psp_snorm8x4 lighting_normals[MATH_BATCH_MAX_COUNT];
+static n64psp_vec4f lighting_scalar[MATH_BATCH_MAX_COUNT];
+static n64psp_vec4f lighting_selected[MATH_BATCH_MAX_COUNT];
+static n64psp_directional_lightf lighting_lights[7];
 #if defined(__PSP__) && N64PSP_USE_VFPU
 static n64psp_vec4f_pair math_batch_baseline[MATH_BATCH_MAX_COUNT];
 static n64psp_vec4f_pair math_batch_candidate[MATH_BATCH_MAX_COUNT];
@@ -113,6 +119,14 @@ static const char* selected_path_name(void) {
     return "chain2 VFPU";
 #else
     return "chain2 scalar";
+#endif
+}
+
+static const char* selected_lighting_path_name(void) {
+#if N64PSP_USE_VFPU
+    return "lighting PSP";
+#else
+    return "lighting scalar";
 #endif
 }
 
@@ -588,6 +602,172 @@ static int run_batch_correctness(void) {
     return 0;
 }
 
+static void initialize_lighting_inputs(void) {
+    unsigned int index;
+
+    for (index = 0u; index < MATH_BATCH_MAX_COUNT; ++index) {
+        lighting_normals[index].x =
+            (int8_t)((int)(index * 17u) % 255 - 127);
+        lighting_normals[index].y =
+            (int8_t)((int)(index * 31u) % 255 - 127);
+        lighting_normals[index].z =
+            (int8_t)((int)(index * 47u) % 255 - 127);
+        lighting_normals[index].w = 0;
+    }
+
+    for (index = 0u; index < 7u; ++index) {
+        float x = (index & 1u) ? -0.5f : 0.5f;
+        float y = (index & 2u) ? -0.25f : 0.75f;
+        float z = (index & 4u) ? -0.8f : 0.4f;
+        float length = x * x + y * y + z * z;
+        float inverse_length = 1.0f;
+
+        if (length > 0.000001f) {
+            inverse_length = 1.0f / __builtin_sqrtf(length);
+        }
+
+        lighting_lights[index].direction.x = x * inverse_length;
+        lighting_lights[index].direction.y = y * inverse_length;
+        lighting_lights[index].direction.z = z * inverse_length;
+        lighting_lights[index].direction.w = 0.0f;
+        lighting_lights[index].color.x = 32.0f + (float)index * 29.0f;
+        lighting_lights[index].color.y = 64.0f + (float)index * 17.0f;
+        lighting_lights[index].color.z = 96.0f + (float)index * 11.0f;
+        lighting_lights[index].color.w = 0.0f;
+    }
+}
+
+static int compare_lighting_output(
+    const n64psp_vec4f* scalar,
+    const n64psp_vec4f* selected,
+    unsigned int count,
+    unsigned int light_count
+) {
+    unsigned int index;
+    unsigned int component;
+
+    for (index = 0u; index < count; ++index) {
+        for (component = 0u; component < 4u; ++component) {
+            const float scalar_value =
+                vector_component(&scalar[index], component);
+            const float selected_value =
+                vector_component(&selected[index], component);
+
+            if (!nearly_equal(selected_value, scalar_value)) {
+                pspDebugScreenPrintf(
+                    "lighting mismatch vertex=%u lights=%u component=%s\n",
+                    index,
+                    light_count,
+                    component_name(component)
+                );
+                pspDebugScreenPrintf(
+                    " scalar=%g %s=%g absdiff=%g\n",
+                    (double)scalar_value,
+                    selected_lighting_path_name(),
+                    (double)selected_value,
+                    (double)absf_local(scalar_value - selected_value)
+                );
+                return 0;
+            }
+        }
+    }
+
+    return 1;
+}
+
+static int run_lighting_correctness(void) {
+    static const unsigned int counts[] = {
+        0u, 1u, 2u, 3u, 4u, 6u, 8u, 10u, 16u, 24u, 32u,
+    };
+    static const unsigned int light_counts[] = {
+        0u, 1u, 2u, 4u, 7u,
+    };
+    static const float normal_rows[4][4] = {
+        {0.0f, -1.0f, 0.0f, 0.0f},
+        {1.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 1.0f},
+    };
+    const n64psp_mat4f normal_matrix = matrix_from_rows(normal_rows);
+    const n64psp_vec4f ambient = {12.0f, 24.0f, 36.0f, 0.0f};
+    unsigned int count_index;
+    unsigned int light_count_index;
+
+    initialize_lighting_inputs();
+
+    n64psp_directional_light_snorm8_batch_scalar(
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        0,
+        0
+    );
+    n64psp_directional_light_snorm8_batch(
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        0,
+        0
+    );
+
+    for (
+        count_index = 0u;
+        count_index < sizeof(counts) / sizeof(counts[0]);
+        ++count_index
+    ) {
+        for (
+            light_count_index = 0u;
+            light_count_index < sizeof(light_counts) / sizeof(light_counts[0]);
+            ++light_count_index
+        ) {
+            const unsigned int count = counts[count_index];
+            const unsigned int light_count = light_counts[light_count_index];
+
+            if (count == 0u) {
+                continue;
+            }
+
+            n64psp_directional_light_snorm8_batch_scalar(
+                lighting_scalar,
+                &normal_matrix,
+                lighting_normals,
+                light_count != 0u ? lighting_lights : NULL,
+                &ambient,
+                light_count,
+                count
+            );
+            n64psp_directional_light_snorm8_batch(
+                lighting_selected,
+                &normal_matrix,
+                lighting_normals,
+                light_count != 0u ? lighting_lights : NULL,
+                &ambient,
+                light_count,
+                count
+            );
+
+            if (!compare_lighting_output(
+                    lighting_scalar,
+                    lighting_selected,
+                    count,
+                    light_count
+                )) {
+                return 1;
+            }
+        }
+    }
+
+    pspDebugScreenPrintf(
+        "lighting batches selected path: %s\n",
+        selected_lighting_path_name()
+    );
+    return 0;
+}
+
 static int matrix_equal(
     const n64psp_mat4f* actual,
     const n64psp_mat4f* expected,
@@ -835,8 +1015,10 @@ static void batch_benchmark_warmup(
 
     consume_batch(math_batch_scalar, MATH_BATCH_MAX_COUNT);
     consume_batch(math_batch_selected, MATH_BATCH_MAX_COUNT);
+#if defined(__PSP__) && N64PSP_USE_VFPU
     consume_batch(math_batch_baseline, MATH_BATCH_MAX_COUNT);
     consume_batch(math_batch_candidate, MATH_BATCH_MAX_COUNT);
+#endif
     consume_batch(math_batch_independent, MATH_BATCH_MAX_COUNT);
 }
 
@@ -1217,6 +1399,10 @@ int n64psp_psp_math_smoke(void) {
     }
 
     if (run_batch_correctness() != 0) {
+        return 1;
+    }
+
+    if (run_lighting_correctness() != 0) {
         return 1;
     }
 
