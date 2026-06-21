@@ -1,27 +1,17 @@
 # n64psp
 
-`n64psp` is an early reusable C runtime and adaptation library for porting Nintendo 64 decompilation and static-recompilation projects to the Sony PSP.
+`n64psp` is a reusable C library for porting N64 projects to the PSP.
 
-## Architecture
+## Capabilities
 
-The project has four layers:
+The capability of n64psp is currently under constant expansion, but its goals are to become:
 
-- Runtime: portable scheduling, queues, time, diagnostics, and future libultra-shaped services.
-- Bridge: optional N64Recomp/RDRAM/PI/overlay helpers.
-- Platform backend: host and PSP implementations of time, logging, semaphores, mutexes, threads, and future I/O.
-- Renderer/task backend: RSP/graphics task recognition and dispatch.
-
-N64ModernRuntime informed the split between a reusable runtime and a recompilation bridge, but this project deliberately uses C ABI structures, function tables, explicit ownership, and bounded allocation instead of desktop C++ abstractions.
+- A high-quality implementation of VFPU work demonstrated by DaedalusX64
+- A smooth layer between N64 OS and PSP calls
+- Able to produce optimised code for any common, reused functionality between N64 ports
 
 ## Tests
 
-Host tests do not require ROMs or proprietary data. PSP-specific behavior is compiled and tested by the PSP smoke app.
+Tests do not require ROMs or proprietary data. PSP-specific behavior is compiled and tested by the PSP smoke app.
 
-## libultra compatibility
-
-The libultra-shaped queue entry points `osSendMesg`, `osJamMesg`, and
-`osRecvMesg` preserve libultra-visible return semantics: `0` on success and
-`-1` on any failure. Detailed `n64psp_result` values remain internal to that
-compatibility surface. If callers need native error reporting, expose it through
-separate `n64psp_*` APIs rather than leaking detailed runtime codes through the
-`os*` API.
+Currently, it is implemented into just [sf64-psp](https://github.com/TheMrIron2/sf64-psp) during development, but it is expected to become part of most or all PSP-N64 ports to bring up the wider quality of code and performance.
