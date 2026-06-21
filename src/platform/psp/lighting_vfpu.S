@@ -13,15 +13,11 @@
  *     const n64psp_mat4f* normal_matrix,        // a1
  *     const n64psp_snorm8x4* normals,           // a2
  *     const n64psp_directional_lightf* lights,  // a3
- *     const n64psp_vec4f* ambient,              // stack + 16
- *     size_t light_count,                       // stack + 20
- *     size_t count                              // stack + 24
+ *     const n64psp_vec4f* ambient,              // t0
+ *     size_t light_count,                       // t1
+ *     size_t count                              // t2
  * );
  *
- * Stack arguments are read at their O32 entry offsets:
- *     16(sp) = ambient
- *     20(sp) = light_count
- *     24(sp) = count
  *
  * Input/output layout:
  *     normals advance by 4 bytes per packed n64psp_snorm8x4.
@@ -47,7 +43,7 @@
  * VFPU clobbers:
  *     M000 rows R000/R001/R002 for the 3x3 matrix.
  *     R200/R201/R203, R300/R301/R302, R600 and R700.
- *     Scalars S210/S211/S302 and S702.
+ *     Scalars S500/S501/S503 and S702.
  *
  * GPR clobbers:
  *     t0-t9. Argument registers a0/a2 are advanced.
@@ -58,12 +54,20 @@
  *     bit-identical.
  */
 n64psp_directional_light_snorm8_batch_vfpu:
-    lw          $t0, 24($sp)
-    beqz        $t0, 1f
+    /*
+     * PSP EABI:
+     *     a0 = output_rgb
+     *     a1 = normal_matrix
+     *     a2 = normals
+     *     a3 = lights
+     *     t0 = ambient
+     *     t1 = light_count
+     *     t2 = count
+     */
+    beqz        $t2, 1f
     nop
 
-    lw          $t4, 16($sp)        /* ambient */
-    lw          $t2, 20($sp)        /* light_count */
+    move        $t4, $t0            /* ambient */
 
     /*
      * Load matrix columns once. vtfm3.t consumes R000/R001/R002 from M000
@@ -80,11 +84,11 @@ n64psp_directional_light_snorm8_batch_vfpu:
     ori         $t5, $t5, 0x37bd    /* 0.000001f */
     mtv         $t5, S702
 
-    sll         $t1, $t0, 2
-    addu        $t1, $a2, $t1      /* normal_end */
-
-    sll         $t9, $t2, 5
+    sll         $t9, $t1, 5
     addu        $t9, $a3, $t9      /* light_end */
+
+    sll         $t1, $t2, 2
+    addu        $t1, $a2, $t1      /* normal_end */
 
 2:
     lw          $t5, 0($a2)
@@ -99,22 +103,31 @@ n64psp_directional_light_snorm8_batch_vfpu:
     sll         $t8, $t5, 8
     sra         $t8, $t8, 24
 
+    /*
+     * R200 lanes are S200, S210 and S220.
+     */
     mtv         $t6, S200
-    mtv         $t7, S201
-    mtv         $t8, S202
+    mtv         $t7, S210
+    mtv         $t8, S220
+    vnop
+    vnop
     vi2f.t      R200, R200, 0
 
     vtfm3.t     R201, M000, R200
-    vdot.t      S210, R201, R201
 
-    vcmp.s      GT, S210, S702
+    /*
+     * Keep normalization temporaries away from R200 and R201.
+     * R201 lanes are S201, S211 and S221.
+     */
+    vdot.t      S500, R201, R201
+
+    vcmp.s      GT, S500, S702
     vnop
     bvf         0, 3f
     nop
 
-    vrsq.s      S211, S210
-    vscl.t      R201, R201, S211
-
+    vrsq.s      S501, S500
+    vscl.t      R201, R201, S501
 3:
     vmov.t      R203, R600
     move        $t3, $a3
@@ -126,9 +139,12 @@ n64psp_directional_light_snorm8_batch_vfpu:
     lv.q        R300, 0($t3)        /* light direction */
     lv.q        R301, 16($t3)       /* light color */
 
-    vdot.t      S302, R201, R300
-    vmax.s      S302, S302, S700
-    vscl.t      R302, R301, S302
+    /*
+     * Keep the dot scalar separate from destination R302.
+     */
+    vdot.t      S503, R201, R300
+    vmax.s      S503, S503, S700
+    vscl.t      R302, R301, S503
     vadd.t      R203, R203, R302
 
     addiu       $t3, $t3, 32
