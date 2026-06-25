@@ -1,7 +1,12 @@
 #ifndef N64PSP_MATH_H
 #define N64PSP_MATH_H
 
+#if !defined(_SIZE_T) && \
+    !defined(_SIZE_T_) && \
+    !defined(_SIZE_T_DEF) && \
+    !defined(_SIZE_T_DECLARED)
 #include <stddef.h>
+#endif
 #include <n64psp/trig.h>
 
 #ifdef __cplusplus
