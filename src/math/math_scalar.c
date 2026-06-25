@@ -1,5 +1,19 @@
 #include "math_internal.h"
 
+#include <math.h>
+
+void n64psp_sincosf_scalar(
+    float radians,
+    float* out_sine,
+    float* out_cosine
+) {
+    const float sine = sinf(radians);
+    const float cosine = cosf(radians);
+
+    *out_sine = sine;
+    *out_cosine = cosine;
+}
+
 void n64psp_mat4f_mul_scalar(
     n64psp_mat4f* out,
     const n64psp_mat4f* a,

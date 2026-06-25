@@ -4,11 +4,96 @@
 #include "math_smoke.h"
 #include <pspdebug.h>
 #include <pspdisplay.h>
+#include <pspiofilemgr.h>
 #include <pspkernel.h>
+#include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
+
+#ifndef N64PSP_PSP_TEXT_LOG
+#define N64PSP_PSP_TEXT_LOG 0
+#endif
+
+#ifndef N64PSP_PSP_TEXT_LOG_PATH
+#define N64PSP_PSP_TEXT_LOG_PATH "ms0:/n64psp_psp_smoke.txt"
+#endif
 
 PSP_MODULE_INFO("n64psp_smoke", PSP_MODULE_USER, 1, 0);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER | THREAD_ATTR_VFPU);
+
+static SceUID smoke_log_fd = -1;
+
+void n64psp_psp_smoke_log_init(void) {
+#if N64PSP_PSP_TEXT_LOG
+    smoke_log_fd = sceIoOpen(
+        N64PSP_PSP_TEXT_LOG_PATH,
+        PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC,
+        0666
+    );
+
+    if (smoke_log_fd >= 0) {
+        static const char header[] = "n64psp PSP smoke log start\n";
+        sceIoWrite(smoke_log_fd, header, (SceSize)(sizeof(header) - 1u));
+    }
+#endif
+}
+
+void n64psp_psp_smoke_log_shutdown(void) {
+#if N64PSP_PSP_TEXT_LOG
+    if (smoke_log_fd >= 0) {
+        static const char footer[] = "n64psp PSP smoke log end\n";
+        sceIoWrite(smoke_log_fd, footer, (SceSize)(sizeof(footer) - 1u));
+        sceIoClose(smoke_log_fd);
+        smoke_log_fd = -1;
+    }
+#endif
+}
+
+int n64psp_psp_smoke_printf(const char* fmt, ...) {
+    char buffer[1024];
+    va_list args;
+    int written;
+    size_t length;
+
+    va_start(args, fmt);
+    written = vsnprintf(buffer, sizeof(buffer), fmt, args);
+    va_end(args);
+
+    if (written < 0) {
+        return written;
+    }
+
+    buffer[sizeof(buffer) - 1u] = '\0';
+    length = strlen(buffer);
+
+    pspDebugScreenPrintf("%s", buffer);
+
+#if N64PSP_PSP_TEXT_LOG
+    if (smoke_log_fd >= 0 && length != 0u) {
+        sceIoWrite(smoke_log_fd, buffer, (SceSize)length);
+    }
+#endif
+
+    return written;
+}
+
+#define pspDebugScreenPrintf n64psp_psp_smoke_printf
+
+static void smoke_platform_log(void *userdata, const char *message) {
+    (void)userdata;
+    pspDebugScreenPrintf("%s\n", message ? message : "(null)");
+}
+
+static void smoke_platform_fatal(void *userdata, const char *message) {
+    (void)userdata;
+    pspDebugScreenPrintf("fatal: %s\n", message ? message : "(null)");
+}
+
+static int smoke_exit_game(int code) {
+    n64psp_psp_smoke_log_shutdown();
+    sceKernelExitGame();
+    return code;
+}
 
 static int exit_callback(int arg1, int arg2, void *common) {
     (void)arg1;
@@ -152,6 +237,7 @@ static int run_psp_pingpong_benchmark(const n64psp_platform_callbacks *platform)
 
 int main(void) {
     pspDebugScreenInit();
+    n64psp_psp_smoke_log_init();
     setup_callbacks();
 
     n64psp_platform_callbacks platform;
@@ -169,34 +255,37 @@ int main(void) {
     n64psp_task_record record;
 
     if (n64psp_platform_psp_get_callbacks(&platform) != N64PSP_OK ||
-        n64psp_trace_backend_get_callbacks(&renderer) != N64PSP_OK ||
-        n64psp_runtime_register_platform(&platform) != N64PSP_OK ||
+        n64psp_trace_backend_get_callbacks(&renderer) != N64PSP_OK) {
+        pspDebugScreenPrintf("runtime setup failed\n");
+        return smoke_exit_game(1);
+    }
+
+    platform.log = smoke_platform_log;
+    platform.fatal = smoke_platform_fatal;
+
+    if (n64psp_runtime_register_platform(&platform) != N64PSP_OK ||
         n64psp_runtime_register_renderer(&renderer) != N64PSP_OK || n64psp_runtime_init() != N64PSP_OK) {
         pspDebugScreenPrintf("runtime setup failed\n");
-        sceKernelExitGame();
-        return 1;
+        return smoke_exit_game(1);
     }
 
     osCreateMesgQueue(&queue, storage, 1);
     if (osSendMesg(&queue, 11, OS_MESG_NOBLOCK) != 0 || osRecvMesg(&queue, &msg, OS_MESG_NOBLOCK) != 0 || msg != 11) {
         pspDebugScreenPrintf("nonblocking queue failed\n");
-        sceKernelExitGame();
-        return 2;
+        return smoke_exit_game(2);
     }
 
     psp_thread_case tc = {&queue, 77};
     if (platform.thread_create(platform.userdata, "n64psp-send", psp_send_thread, &tc, 0x4000, 0x20, &thread) !=
         N64PSP_OK) {
         pspDebugScreenPrintf("thread create failed\n");
-        sceKernelExitGame();
-        return 3;
+        return smoke_exit_game(3);
     }
     platform.sleep_us(platform.userdata, 10000);
     if (osRecvMesg(&queue, &msg, OS_MESG_BLOCK) != 0 || msg != 77 ||
         platform.thread_join(platform.userdata, thread, &thread_code) != N64PSP_OK || thread_code != 0) {
         pspDebugScreenPrintf("blocking queue failed\n");
-        sceKernelExitGame();
-        return 4;
+        return smoke_exit_game(4);
     }
     platform.thread_destroy(platform.userdata, thread);
 
@@ -206,28 +295,25 @@ int main(void) {
         n64psp_rdram_store_be32(&rdram, 0x80000000u, 0x11223344u) != N64PSP_OK ||
         n64psp_submit_task(&task, &record) != N64PSP_ERROR_UNSUPPORTED) {
         pspDebugScreenPrintf("bridge/task smoke failed\n");
-        sceKernelExitGame();
-        return 5;
+        return smoke_exit_game(5);
     }
     if (n64psp_psp_math_smoke() != 0) {
         pspDebugScreenPrintf("math smoke failed\n");
-        sceKernelExitGame();
-        return 6;
+        return smoke_exit_game(6);
     }
 #if N64PSP_PSP_BENCHMARKS
     if (run_psp_queue_benchmark() != 0) {
         pspDebugScreenPrintf("queue benchmark failed\n");
-        sceKernelExitGame();
-        return 7;
+        return smoke_exit_game(7);
     }
     if (run_psp_pingpong_benchmark(&platform) != 0) {
         pspDebugScreenPrintf("queue pingpong benchmark failed\n");
-        sceKernelExitGame();
-        return 8;
+        return smoke_exit_game(8);
     }
 #endif
     n64psp_runtime_shutdown();
     pspDebugScreenPrintf("n64psp PSP smoke passed\n");
+    n64psp_psp_smoke_log_shutdown();
     sceDisplayWaitVblankStart();
     sceKernelDelayThread(1000000);
     sceKernelExitGame();

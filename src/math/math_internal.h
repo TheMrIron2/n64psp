@@ -3,6 +3,12 @@
 
 #include <n64psp/math.h>
 
+void n64psp_sincosf_scalar(
+    float radians,
+    float* out_sine,
+    float* out_cosine
+);
+
 void n64psp_mat4f_mul_scalar(
     n64psp_mat4f* out,
     const n64psp_mat4f* a,
@@ -50,6 +56,12 @@ void n64psp_mat4f_transform_vec4_precompose_2mat_batch_experimental(
 );
 
 #if defined(__PSP__) && N64PSP_USE_VFPU
+void n64psp_sincosf_vfpu(
+    float radians,
+    float* out_sine,
+    float* out_cosine
+);
+
 void n64psp_mat4f_mul_vfpu(
     n64psp_mat4f* out,
     const n64psp_mat4f* a,
