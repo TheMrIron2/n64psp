@@ -4,6 +4,50 @@
     .set noat
 
     .align 2
+    .global n64psp_sincosf_vfpu
+    .type n64psp_sincosf_vfpu, @function
+
+/*
+ * void n64psp_sincosf_vfpu(
+ *     float radians,       // f12
+ *     float* out_sine,     // a0
+ *     float* out_cosine    // a1
+ * );
+ *
+ * PSP GCC's single-float ABI passes the scalar float argument in f12 and the
+ * two pointer arguments in a0/a1. The angle is moved through a GPR into S000.
+ *
+ * VFPU trig instructions use a binary-angle scale where 1.0 is pi/2.
+ * Convert ordinary radians with VFPU_2_PI:
+ *
+ *     vfpu_angle = radians * (2.0 / pi)
+ *
+ * vrot.p with immediate [s,c] stores:
+ *
+ *     C010[0] = sin(radians)
+ *     C010[1] = cos(radians)
+ *
+ * The destination pair does not overlap the source scalar register. The stores
+ * are ordered sine first, cosine second, matching the scalar alias behavior.
+ *
+ * Clobbers: GPR a2; VFPU scalars S000, S001, S010, S011.
+ * Does not modify VFPU control state.
+ */
+n64psp_sincosf_vfpu:
+    mfc1        $a2, $f12
+    mtv         $a2, S000
+    vcst.s      S001, VFPU_2_PI
+    vmul.s      S000, S000, S001
+    vrot.p      C010, S000, [s,c]
+    sv.s        S010, 0($a0)
+    sv.s        S011, 0($a1)
+
+    jr          $ra
+    nop
+
+    .size n64psp_sincosf_vfpu, .-n64psp_sincosf_vfpu
+
+    .align 2
     .global n64psp_mat4f_mul_vfpu
     .type n64psp_mat4f_mul_vfpu, @function
 

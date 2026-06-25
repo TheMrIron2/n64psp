@@ -11,6 +11,14 @@
 #include <stdint.h>
 #include <string.h>
 
+#ifndef N64PSP_PSP_TEXT_LOG
+#define N64PSP_PSP_TEXT_LOG 0
+#endif
+
+#if N64PSP_PSP_TEXT_LOG
+#define pspDebugScreenPrintf n64psp_psp_smoke_printf
+#endif
+
 #ifndef N64PSP_USE_VFPU
 #define N64PSP_USE_VFPU 0
 #endif
@@ -145,6 +153,140 @@ static const char* selected_lighting_path_name(void) {
 #else
     return "lighting scalar";
 #endif
+}
+
+static const char* selected_sincos_path_name(void) {
+#if N64PSP_USE_VFPU
+    return "sincos VFPU";
+#else
+    return "sincos scalar";
+#endif
+}
+
+static int sincos_nearly_equal(float actual, float expected) {
+    const float difference = absf_local(actual - expected);
+    const float scale = absf_local(expected);
+
+    return difference <= 1.0e-5f + 1.0e-5f * scale;
+}
+
+static int run_sincos_case(
+    float angle,
+    const char* source,
+    float* out_max_sine_error,
+    float* out_max_cosine_error
+) {
+    float scalar_sine;
+    float scalar_cosine;
+    float selected_sine;
+    float selected_cosine;
+    float sine_error;
+    float cosine_error;
+
+    n64psp_sincosf_scalar(angle, &scalar_sine, &scalar_cosine);
+    n64psp_sincosf(angle, &selected_sine, &selected_cosine);
+
+    sine_error = absf_local(selected_sine - scalar_sine);
+    cosine_error = absf_local(selected_cosine - scalar_cosine);
+
+    if (sine_error > *out_max_sine_error) {
+        *out_max_sine_error = sine_error;
+    }
+
+    if (cosine_error > *out_max_cosine_error) {
+        *out_max_cosine_error = cosine_error;
+    }
+
+    if (!sincos_nearly_equal(selected_sine, scalar_sine) ||
+        !sincos_nearly_equal(selected_cosine, scalar_cosine)) {
+        pspDebugScreenPrintf(
+            "sincos mismatch source=%s angle=%g\n",
+            source,
+            (double)angle
+        );
+        pspDebugScreenPrintf(
+            " scalar={%g,%g} %s={%g,%g} err={%g,%g}\n",
+            (double)scalar_sine,
+            (double)scalar_cosine,
+            selected_sincos_path_name(),
+            (double)selected_sine,
+            (double)selected_cosine,
+            (double)sine_error,
+            (double)cosine_error
+        );
+        return 0;
+    }
+
+    return 1;
+}
+
+static int run_sincos_correctness(void) {
+    const float pi = 3.14159265358979323846f;
+    const float tiny = 1.0e-7f;
+    static const float fractions[] = {
+        0.0f,
+        1.0f / 6.0f,
+        -1.0f / 6.0f,
+        1.0f / 4.0f,
+        -1.0f / 4.0f,
+        1.0f / 2.0f,
+        -1.0f / 2.0f,
+        1.0f,
+        -1.0f,
+        2.0f,
+        -2.0f,
+    };
+    float max_sine_error = 0.0f;
+    float max_cosine_error = 0.0f;
+    unsigned int index;
+    int step;
+
+    if (!run_sincos_case(0.0f, "zero", &max_sine_error, &max_cosine_error) ||
+        !run_sincos_case(tiny, "positive tiny", &max_sine_error, &max_cosine_error) ||
+        !run_sincos_case(-tiny, "negative tiny", &max_sine_error, &max_cosine_error)) {
+        return 1;
+    }
+
+    for (index = 0u; index < sizeof(fractions) / sizeof(fractions[0]); ++index) {
+        if (!run_sincos_case(
+                pi * fractions[index],
+                "representative",
+                &max_sine_error,
+                &max_cosine_error
+            )) {
+            return 1;
+        }
+    }
+
+    for (step = 0; step <= 512; ++step) {
+        const float angle =
+            -8.0f * pi +
+            (16.0f * pi * (float)step) / 512.0f;
+
+        if (!run_sincos_case(
+                angle,
+                "sweep",
+                &max_sine_error,
+                &max_cosine_error
+            )) {
+            return 1;
+        }
+    }
+
+    pspDebugScreenPrintf(
+        "sincos selected path: %s max_err={%g,%g}\n",
+        selected_sincos_path_name(),
+        (double)max_sine_error,
+        (double)max_cosine_error
+    );
+    pspDebugScreenPrintf(
+        "sincos git=%s vfpu=%d opt=%s\n",
+        N64PSP_GIT_COMMIT,
+        N64PSP_USE_VFPU,
+        N64PSP_PSP_OPT_FLAGS
+    );
+
+    return 0;
 }
 
 static int compare_batch_output(
@@ -1615,6 +1757,122 @@ static void print_benchmark_result(
     );
 }
 
+static float sincos_benchmark_angle(uint32_t iteration) {
+    return
+        (float)(iteration & 4095u) * 0.0030679615f -
+        6.28318530717958647692f;
+}
+
+static void sincos_benchmark_warmup(void) {
+    float sine = 0.0f;
+    float cosine = 0.0f;
+    uint32_t iteration;
+
+    for (iteration = 0u; iteration < 256u; ++iteration) {
+        const float angle = sincos_benchmark_angle(iteration);
+
+        n64psp_sincosf_scalar(angle, &sine, &cosine);
+        math_benchmark_checksum += sine + cosine;
+        n64psp_sincosf(angle, &sine, &cosine);
+        math_benchmark_checksum += sine + cosine;
+    }
+}
+
+static void print_sincos_benchmark_result(
+    const char* name,
+    uint64_t iterations,
+    n64psp_time_us elapsed
+) {
+    const uint64_t nanoseconds_per_pair =
+        elapsed != 0
+            ? ((uint64_t)elapsed * 1000ULL) / iterations
+            : 0ULL;
+
+    pspDebugScreenPrintf(
+        "%s: total=%llu us ns/pair=%llu\n",
+        name,
+        (unsigned long long)elapsed,
+        (unsigned long long)nanoseconds_per_pair
+    );
+}
+
+static int run_sincos_benchmark(void) {
+    enum {
+        ITERATIONS = 300000
+    };
+
+    float sine = 0.0f;
+    float cosine = 0.0f;
+    n64psp_time_us scalar_start;
+    n64psp_time_us scalar_end;
+    n64psp_time_us selected_start;
+    n64psp_time_us selected_end;
+    uint64_t ratio_thousandths = 0ULL;
+    uint32_t iteration;
+
+    sincos_benchmark_warmup();
+
+    pspDebugScreenPrintf(
+        "sincos benchmark git=%s vfpu=%d opt=%s selected=%s\n",
+        N64PSP_GIT_COMMIT,
+        N64PSP_USE_VFPU,
+        N64PSP_PSP_OPT_FLAGS,
+        selected_sincos_path_name()
+    );
+
+    scalar_start = n64psp_time_monotonic_us();
+
+    for (iteration = 0u; iteration < (uint32_t)ITERATIONS; ++iteration) {
+        n64psp_sincosf_scalar(
+            sincos_benchmark_angle(iteration),
+            &sine,
+            &cosine
+        );
+        math_benchmark_checksum += sine + cosine;
+    }
+
+    scalar_end = n64psp_time_monotonic_us();
+
+    selected_start = n64psp_time_monotonic_us();
+
+    for (iteration = 0u; iteration < (uint32_t)ITERATIONS; ++iteration) {
+        n64psp_sincosf(
+            sincos_benchmark_angle(iteration),
+            &sine,
+            &cosine
+        );
+        math_benchmark_checksum += sine + cosine;
+    }
+
+    selected_end = n64psp_time_monotonic_us();
+
+    print_sincos_benchmark_result(
+        "sincos scalar",
+        ITERATIONS,
+        scalar_end - scalar_start
+    );
+
+    print_sincos_benchmark_result(
+        selected_sincos_path_name(),
+        ITERATIONS,
+        selected_end - selected_start
+    );
+
+    if (selected_end > selected_start) {
+        ratio_thousandths =
+            ((uint64_t)(scalar_end - scalar_start) * 1000ULL) /
+            (uint64_t)(selected_end - selected_start);
+    }
+
+    pspDebugScreenPrintf(
+        "sincos scalar/selected: %llu.%03llux\n",
+        (unsigned long long)(ratio_thousandths / 1000ULL),
+        (unsigned long long)(ratio_thousandths % 1000ULL)
+    );
+
+    return 0;
+}
+
 static int run_math_benchmark(void) {
     enum {
         ITERATIONS = 200000
@@ -1704,6 +1962,10 @@ static int run_math_benchmark(void) {
 #endif
 
 int n64psp_psp_math_smoke(void) {
+    if (run_sincos_correctness() != 0) {
+        return 1;
+    }
+
     if (run_math_correctness() != 0) {
         return 1;
     }
@@ -1717,6 +1979,10 @@ int n64psp_psp_math_smoke(void) {
     }
 
 #if N64PSP_PSP_BENCHMARKS
+    if (run_sincos_benchmark() != 0) {
+        return 1;
+    }
+
     if (run_math_benchmark() != 0) {
         return 1;
     }

@@ -6,6 +6,18 @@
 #define N64PSP_USE_VFPU 0
 #endif
 
+void n64psp_sincosf(
+    float radians,
+    float* out_sine,
+    float* out_cosine
+) {
+#if defined(__PSP__) && N64PSP_USE_VFPU
+    n64psp_sincosf_vfpu(radians, out_sine, out_cosine);
+#else
+    n64psp_sincosf_scalar(radians, out_sine, out_cosine);
+#endif
+}
+
 void n64psp_mat4f_mul(
     n64psp_mat4f* out,
     const n64psp_mat4f* a,

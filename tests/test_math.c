@@ -2,6 +2,7 @@
 
 #include "../src/math/math_internal.h"
 
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -68,6 +69,130 @@ static int nearly_equal(float actual, float expected) {
     const float scale = absf_local(expected);
 
     return difference <= 1.0e-5f + 1.0e-5f * scale;
+}
+
+static int sincos_nearly_equal(float actual, float expected) {
+    const float difference = absf_local(actual - expected);
+    const float scale = absf_local(expected);
+
+    return difference <= 1.0e-5f + 1.0e-5f * scale;
+}
+
+static int sincos_case(float angle, const char* source) {
+    float selected_sine;
+    float selected_cosine;
+    float scalar_sine;
+    float scalar_cosine;
+    float reference_sine;
+    float reference_cosine;
+    float unit_length;
+
+    n64psp_sincosf(angle, &selected_sine, &selected_cosine);
+    n64psp_sincosf_scalar(angle, &scalar_sine, &scalar_cosine);
+
+    reference_sine = sinf(angle);
+    reference_cosine = cosf(angle);
+
+    if (!sincos_nearly_equal(selected_sine, reference_sine) ||
+        !sincos_nearly_equal(selected_cosine, reference_cosine) ||
+        !sincos_nearly_equal(scalar_sine, reference_sine) ||
+        !sincos_nearly_equal(scalar_cosine, reference_cosine)) {
+        fprintf(
+            stderr,
+            "sincos mismatch source=%s angle=%g "
+            "selected={%g,%g} scalar={%g,%g} reference={%g,%g}\n",
+            source,
+            (double)angle,
+            (double)selected_sine,
+            (double)selected_cosine,
+            (double)scalar_sine,
+            (double)scalar_cosine,
+            (double)reference_sine,
+            (double)reference_cosine
+        );
+        return 0;
+    }
+
+    unit_length =
+        selected_sine * selected_sine +
+        selected_cosine * selected_cosine;
+
+    if (!sincos_nearly_equal(unit_length, 1.0f)) {
+        fprintf(
+            stderr,
+            "sincos unit mismatch source=%s angle=%g "
+            "sin=%g cos=%g sin2cos2=%g\n",
+            source,
+            (double)angle,
+            (double)selected_sine,
+            (double)selected_cosine,
+            (double)unit_length
+        );
+        return 0;
+    }
+
+    return 1;
+}
+
+static uint32_t sincos_random_state = UINT32_C(0x53434650);
+
+static float next_sincos_random_angle(void) {
+    sincos_random_state =
+        sincos_random_state * UINT32_C(1664525) +
+        UINT32_C(1013904223);
+
+    return
+        ((float)((sincos_random_state >> 8) & UINT32_C(0xffff)) /
+            65535.0f) *
+            2048.0f -
+        1024.0f;
+}
+
+static int test_sincosf(void) {
+    const float pi = 3.14159265358979323846f;
+    const float tiny = 1.0e-7f;
+    static const float fractions[] = {
+        0.0f,
+        1.0f / 6.0f,
+        -1.0f / 6.0f,
+        1.0f / 4.0f,
+        -1.0f / 4.0f,
+        1.0f / 2.0f,
+        -1.0f / 2.0f,
+        1.0f,
+        -1.0f,
+        2.0f,
+        -2.0f,
+    };
+    float alias_value = 123.0f;
+    size_t index;
+    int step;
+
+    CHECK(sincos_case(0.0f, "zero"));
+    CHECK(sincos_case(tiny, "positive tiny"));
+    CHECK(sincos_case(-tiny, "negative tiny"));
+
+    for (index = 0; index < sizeof(fractions) / sizeof(fractions[0]); ++index) {
+        CHECK(sincos_case(pi * fractions[index], "representative"));
+    }
+
+    for (step = 0; step <= 1024; ++step) {
+        const float angle =
+            -8.0f * pi +
+            (16.0f * pi * (float)step) / 1024.0f;
+
+        CHECK(sincos_case(angle, "sweep"));
+    }
+
+    sincos_random_state = UINT32_C(0x53434650);
+    for (index = 0; index < 2048u; ++index) {
+        CHECK(sincos_case(next_sincos_random_angle(), "random"));
+    }
+
+    n64psp_sincosf_scalar(pi * 0.25f, &alias_value, &alias_value);
+    CHECK(sincos_nearly_equal(alias_value, cosf(pi * 0.25f)));
+
+    return 0;
 }
 
 static int vector_equal(
@@ -959,6 +1084,7 @@ static int test_batch_count_coverage(void) {
 
 int main(void) {
     CHECK(test_layout_and_alignment() == 0);
+    CHECK(test_sincosf() == 0);
     CHECK(test_matrix_multiply_and_transform() == 0);
     CHECK(test_random_matrix_multiply() == 0);
     CHECK(test_extreme_finite_values() == 0);
