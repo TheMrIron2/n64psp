@@ -6,13 +6,21 @@
 #define N64PSP_USE_VFPU 0
 #endif
 
+#define N64PSP_SINCOS_VFPU_MAX_RADIANS \
+    25.1327412287183459077f /* 8 * pi */
+
 void n64psp_sincosf(
     float radians,
     float* out_sine,
     float* out_cosine
 ) {
 #if defined(__PSP__) && N64PSP_USE_VFPU
-    n64psp_sincosf_vfpu(radians, out_sine, out_cosine);
+    if ((radians >= -N64PSP_SINCOS_VFPU_MAX_RADIANS) &&
+        (radians <= N64PSP_SINCOS_VFPU_MAX_RADIANS)) {
+        n64psp_sincosf_vfpu(radians, out_sine, out_cosine);
+    } else {
+        n64psp_sincosf_scalar(radians, out_sine, out_cosine);
+    }
 #else
     n64psp_sincosf_scalar(radians, out_sine, out_cosine);
 #endif

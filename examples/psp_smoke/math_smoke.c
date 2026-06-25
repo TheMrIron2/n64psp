@@ -155,9 +155,23 @@ static const char* selected_lighting_path_name(void) {
 #endif
 }
 
+static uint32_t sincos_random_state = UINT32_C(0x53434650);
+
+static float next_sincos_random_angle(void) {
+    sincos_random_state =
+        sincos_random_state * UINT32_C(1664525) +
+        UINT32_C(1013904223);
+
+    return
+        ((float)((sincos_random_state >> 8) & UINT32_C(0xffff)) /
+            65535.0f) *
+            2048.0f -
+        1024.0f;
+}
+
 static const char* selected_sincos_path_name(void) {
 #if N64PSP_USE_VFPU
-    return "sincos VFPU";
+    return "sincos VFPU with scalar fallback";
 #else
     return "sincos scalar";
 #endif
@@ -223,6 +237,8 @@ static int run_sincos_case(
 static int run_sincos_correctness(void) {
     const float pi = 3.14159265358979323846f;
     const float tiny = 1.0e-7f;
+    const float vfpu_limit = 8.0f * pi;
+    const float boundary_delta = 1.0e-3f;
     static const float fractions[] = {
         0.0f,
         1.0f / 6.0f,
@@ -239,6 +255,7 @@ static int run_sincos_correctness(void) {
     float max_sine_error = 0.0f;
     float max_cosine_error = 0.0f;
     unsigned int index;
+    unsigned int random_index;
     int step;
 
     if (!run_sincos_case(0.0f, "zero", &max_sine_error, &max_cosine_error) ||
@@ -258,6 +275,45 @@ static int run_sincos_correctness(void) {
         }
     }
 
+    if (!run_sincos_case(
+            vfpu_limit - boundary_delta,
+            "positive VFPU boundary inside",
+            &max_sine_error,
+            &max_cosine_error
+        ) ||
+        !run_sincos_case(
+            vfpu_limit,
+            "positive VFPU boundary exact",
+            &max_sine_error,
+            &max_cosine_error
+        ) ||
+        !run_sincos_case(
+            vfpu_limit + boundary_delta,
+            "positive scalar boundary outside",
+            &max_sine_error,
+            &max_cosine_error
+        ) ||
+        !run_sincos_case(
+            -vfpu_limit + boundary_delta,
+            "negative VFPU boundary inside",
+            &max_sine_error,
+            &max_cosine_error
+        ) ||
+        !run_sincos_case(
+            -vfpu_limit,
+            "negative VFPU boundary exact",
+            &max_sine_error,
+            &max_cosine_error
+        ) ||
+        !run_sincos_case(
+            -vfpu_limit - boundary_delta,
+            "negative scalar boundary outside",
+            &max_sine_error,
+            &max_cosine_error
+        )) {
+        return 1;
+    }
+
     for (step = 0; step <= 512; ++step) {
         const float angle =
             -8.0f * pi +
@@ -266,6 +322,19 @@ static int run_sincos_correctness(void) {
         if (!run_sincos_case(
                 angle,
                 "sweep",
+                &max_sine_error,
+                &max_cosine_error
+            )) {
+            return 1;
+        }
+    }
+
+    sincos_random_state = UINT32_C(0x53434650);
+
+    for (random_index = 0u; random_index < 2048u; ++random_index) {
+        if (!run_sincos_case(
+                next_sincos_random_angle(),
+                "random",
                 &max_sine_error,
                 &max_cosine_error
             )) {

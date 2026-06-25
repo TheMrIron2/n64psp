@@ -38,12 +38,14 @@ typedef struct N64PSP_ALIGN16 n64psp_vec4f_pair {
  * Dispatch:
  *     Host builds use the scalar implementation.
  *     PSP builds with N64PSP_USE_VFPU=0 use the scalar implementation.
- *     PSP builds with N64PSP_USE_VFPU=1 use the VFPU implementation.
+ *     PSP builds with N64PSP_USE_VFPU=1 use the VFPU implementation for
+ *     angles in the hardware-validated range [-8*pi, +8*pi], with scalar
+ *     fallback outside that range.
  *
  * Floating point:
- *     Scalar and VFPU results are expected to match within
- *     1.0e-5 absolute/relative tolerance for ordinary finite inputs, but
- *     are not required to be bit-identical.
+ *     The selected result is expected to match the scalar reference within
+ *     1.0e-5 absolute/relative tolerance for finite inputs, but is not
+ *     required to be bit-identical.
  *
  * PSP callers selecting the VFPU path must execute on a thread with
  * PSP_THREAD_ATTR_VFPU.
