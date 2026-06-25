@@ -2,6 +2,7 @@
 #define N64PSP_MATH_H
 
 #include <stddef.h>
+#include <n64psp/trig.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,33 +29,6 @@ typedef struct N64PSP_ALIGN16 n64psp_vec4f_pair {
     n64psp_vec4f first;
     n64psp_vec4f second;
 } n64psp_vec4f_pair;
-
-/*
- * Calculates sine and cosine for one finite radian angle.
- *
- * out_sine and out_cosine must be non-NULL. They may point to the same
- * float; in that case the cosine store is last and remains visible.
- *
- * Dispatch:
- *     Host builds use the scalar implementation.
- *     PSP builds with N64PSP_USE_VFPU=0 use the scalar implementation.
- *     PSP builds with N64PSP_USE_VFPU=1 use the VFPU implementation for
- *     angles in the hardware-validated range [-8*pi, +8*pi], with scalar
- *     fallback outside that range.
- *
- * Floating point:
- *     The selected result is expected to match the scalar reference within
- *     1.0e-5 absolute/relative tolerance for finite inputs, but is not
- *     required to be bit-identical.
- *
- * PSP callers selecting the VFPU path must execute on a thread with
- * PSP_THREAD_ATTR_VFPU.
- */
-void n64psp_sincosf(
-    float radians,
-    float* out_sine,
-    float* out_cosine
-);
 
 /*
  * Matrix storage convention
