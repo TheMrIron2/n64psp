@@ -36,7 +36,9 @@ MATH_SOURCES := \
 	src/math/math_api.c \
 	src/math/math_scalar.c \
 	src/math/lighting_api.c \
-	src/math/lighting_scalar.c
+	src/math/lighting_scalar.c \
+	src/math/tnl_api.c \
+	src/math/tnl_scalar.c
 
 PSP_PLATFORM_SOURCES := \
 	src/platform/psp/platform_psp.c
@@ -49,7 +51,8 @@ PSP_MATH_ASM_SOURCES :=
 ifeq ($(N64PSP_USE_VFPU),1)
 PSP_MATH_ASM_SOURCES += \
 	src/platform/psp/math_vfpu.S \
-	src/platform/psp/lighting_vfpu.S
+	src/platform/psp/lighting_vfpu.S \
+	src/platform/psp/tnl_vfpu.S
 endif
 
 PSP_RUNTIME_OBJECTS := \
@@ -159,6 +162,9 @@ HOST_MATH_TEST_OBJECT := \
 HOST_LIGHTING_TEST_OBJECT := \
 	$(BUILD_HOST)/tests/test_lighting.o
 
+HOST_TNL_TEST_OBJECT := \
+	$(BUILD_HOST)/tests/test_tnl.o
+
 HOST_SMOKE_OBJECTS := \
 	$(patsubst %.c,$(BUILD_HOST)/%.o,$(HOST_SOURCES) examples/host_smoke/main.c)
 
@@ -189,6 +195,7 @@ HOST_LDLIBS := -pthread -lm
 	test-runtime \
 	test-math \
 	test-lighting \
+	test-tnl \
 	smoke-host \
 	benchmark-host \
 	inspect-psp \
@@ -285,6 +292,14 @@ $(BUILD_HOST)/n64psp_lighting_tests: \
 		$(BUILD_HOST)/libn64psp_math.a \
 		$(HOST_LDLIBS)
 
+$(BUILD_HOST)/n64psp_tnl_tests: \
+	$(HOST_TNL_TEST_OBJECT) \
+	$(BUILD_HOST)/libn64psp_math.a
+	$(HOST_CC) -o $@ \
+		$(HOST_TNL_TEST_OBJECT) \
+		$(BUILD_HOST)/libn64psp_math.a \
+		$(HOST_LDLIBS)
+
 $(BUILD_HOST)/n64psp_host_smoke: $(HOST_SMOKE_OBJECTS)
 	$(HOST_CC) -o $@ $^ $(HOST_LDLIBS)
 
@@ -300,7 +315,10 @@ test-math: $(BUILD_HOST)/n64psp_math_tests
 test-lighting: $(BUILD_HOST)/n64psp_lighting_tests
 	./$(BUILD_HOST)/n64psp_lighting_tests
 
-test: test-runtime test-math test-lighting
+test-tnl: $(BUILD_HOST)/n64psp_tnl_tests
+	./$(BUILD_HOST)/n64psp_tnl_tests
+
+test: test-runtime test-math test-lighting test-tnl
 
 smoke-host: $(BUILD_HOST)/n64psp_host_smoke
 	./$(BUILD_HOST)/n64psp_host_smoke
