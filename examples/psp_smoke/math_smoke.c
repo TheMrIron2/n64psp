@@ -6,6 +6,7 @@
 #include "n64psp/lighting.h"
 #include "n64psp/math.h"
 #include "n64psp/runtime.h"
+#include "n64psp/tnl.h"
 
 #include <pspdebug.h>
 #include <stdint.h>
@@ -73,6 +74,65 @@ static n64psp_directional_lightf lighting_lights[7];
 static n64psp_vec4f_pair math_batch_baseline[MATH_BATCH_MAX_COUNT];
 static n64psp_vec4f_pair math_batch_candidate[MATH_BATCH_MAX_COUNT];
 #endif
+
+static int run_tnl_correctness(void) {
+    n64psp_tnl_matrices matrices;
+    n64psp_packed_vertex vertex;
+    n64psp_vec4f ambient;
+    unsigned int column;
+    unsigned int row;
+
+    memset(&matrices, 0, sizeof(matrices));
+    memset(&vertex, 0, sizeof(vertex));
+    for (column = 0u; column < 4u; ++column) {
+        for (row = 0u; row < 4u; ++row) {
+            matrices.modelview.m[column][row] = column == row ? 1.0f : 0.0f;
+            matrices.projection.m[column][row] = column == row ? 1.0f : 0.0f;
+        }
+    }
+    vertex.position[0] = 3;
+    vertex.position[1] = -4;
+    vertex.position[2] = 5;
+    ambient.x = 10.0f;
+    ambient.y = 20.0f;
+    ambient.z = 30.0f;
+    ambient.w = 0.0f;
+
+    n64psp_tnl_transform_packed_batch(
+        math_batch_selected, &matrices, &vertex, 1u
+    );
+    if ((math_batch_selected[0].first.x != 3.0f) ||
+        (math_batch_selected[0].first.y != -4.0f) ||
+        (math_batch_selected[0].first.z != 5.0f) ||
+        (math_batch_selected[0].first.w != 1.0f) ||
+        (math_batch_selected[0].second.x != 3.0f) ||
+        (math_batch_selected[0].second.y != -4.0f) ||
+        (math_batch_selected[0].second.z != 5.0f) ||
+        (math_batch_selected[0].second.w != 1.0f)) {
+        pspDebugScreenPrintf("packed TnL transform failed\n");
+        return 1;
+    }
+
+    n64psp_tnl_transform_light_packed_batch(
+        math_batch_selected,
+        lighting_selected,
+        &matrices,
+        &vertex,
+        NULL,
+        &ambient,
+        0u,
+        1u
+    );
+    if ((lighting_selected[0].x != ambient.x) ||
+        (lighting_selected[0].y != ambient.y) ||
+        (lighting_selected[0].z != ambient.z) ||
+        (lighting_selected[0].w != 0.0f)) {
+        pspDebugScreenPrintf("packed TnL lighting failed\n");
+        return 1;
+    }
+
+    return 0;
+}
 #if N64PSP_PSP_BENCHMARKS
 static n64psp_vec4f_pair math_batch_independent[MATH_BATCH_MAX_COUNT];
 #endif
@@ -2044,6 +2104,10 @@ int n64psp_psp_math_smoke(void) {
     }
 
     if (run_lighting_correctness() != 0) {
+        return 1;
+    }
+
+    if (run_tnl_correctness() != 0) {
         return 1;
     }
 

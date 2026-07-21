@@ -46,3 +46,10 @@ not part of the generic message queue implementation.
 ## Renderer/Task Services
 
 Trace backend is implemented. It records submitted task metadata and returns `N64PSP_ERROR_UNSUPPORTED`.
+
+## Transform and Lighting
+
+| API | Status | Notes |
+| --- | ------ | ----- |
+| Packed vertex transform | Experimental | Scalar tested and PSP hardware validated in SF64 with a dependent modelview-projection chain |
+| Packed vertex transform with lighting | Experimental | PSP hardware validated in SF64 without position or normal staging |
