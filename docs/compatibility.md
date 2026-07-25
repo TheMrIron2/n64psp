@@ -53,3 +53,4 @@ Trace backend is implemented. It records submitted task metadata and returns `N6
 | --- | ------ | ----- |
 | Packed vertex transform | Experimental | Scalar tested and PSP hardware validated in SF64 with a dependent modelview-projection chain |
 | Packed vertex transform with lighting | Experimental | PSP hardware validated in SF64 without position or normal staging |
+| Strided packed vertex finalization | Experimental | Scalar tested with PSP VFPU smoke coverage; writes view, clip, projected coordinates, clip code and validity directly |

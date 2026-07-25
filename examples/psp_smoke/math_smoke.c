@@ -59,6 +59,14 @@ typedef struct N64PSP_ALIGN16 lighting_output_guard {
     uint32_t after[LIGHTING_CANARY_WORDS];
 } lighting_output_guard;
 
+typedef struct N64PSP_ALIGN16 tnl_direct_output {
+    n64psp_vec4f view;
+    n64psp_vec4f clip;
+    float projected[3];
+    uint32_t clip_code;
+    uint32_t valid;
+} tnl_direct_output;
+
 static n64psp_vec4f math_batch_input[MATH_BATCH_MAX_COUNT];
 static n64psp_vec4f_pair math_batch_scalar[MATH_BATCH_MAX_COUNT];
 static n64psp_vec4f_pair math_batch_selected[MATH_BATCH_MAX_COUNT];
@@ -66,6 +74,7 @@ static lighting_normal_guard lighting_normals_guard;
 static lighting_output_guard lighting_scalar_guard;
 static lighting_output_guard lighting_selected_guard;
 static n64psp_directional_lightf lighting_lights[7];
+static tnl_direct_output tnl_direct_selected[1];
 
 #define lighting_normals lighting_normals_guard.values
 #define lighting_scalar lighting_scalar_guard.values
@@ -78,6 +87,8 @@ static n64psp_vec4f_pair math_batch_candidate[MATH_BATCH_MAX_COUNT];
 static int run_tnl_correctness(void) {
     n64psp_tnl_matrices matrices;
     n64psp_packed_vertex vertex;
+    n64psp_tnl_output_streams streams;
+    n64psp_directional_lightf direct_light;
     n64psp_vec4f ambient;
     unsigned int column;
     unsigned int row;
@@ -97,6 +108,14 @@ static int run_tnl_correctness(void) {
     ambient.y = 20.0f;
     ambient.z = 30.0f;
     ambient.w = 0.0f;
+    streams.view = &tnl_direct_selected[0].view;
+    streams.clip = &tnl_direct_selected[0].clip;
+    streams.projected = &tnl_direct_selected[0].projected;
+    streams.lighting = &lighting_selected[0];
+    streams.clip_code = &tnl_direct_selected[0].clip_code;
+    streams.valid = &tnl_direct_selected[0].valid;
+    streams.vertex_stride = sizeof(tnl_direct_selected[0]);
+    streams.lighting_stride = sizeof(lighting_selected[0]);
 
     n64psp_tnl_transform_packed_batch(
         math_batch_selected, &matrices, &vertex, 1u
@@ -128,6 +147,74 @@ static int run_tnl_correctness(void) {
         (lighting_selected[0].z != ambient.z) ||
         (lighting_selected[0].w != 0.0f)) {
         pspDebugScreenPrintf("packed TnL lighting failed\n");
+        return 1;
+    }
+
+    n64psp_tnl_transform_project_light_packed_batch(
+        &streams,
+        &matrices,
+        &vertex,
+        NULL,
+        &ambient,
+        0u,
+        1,
+        1u
+    );
+    if ((tnl_direct_selected[0].view.x != 3.0f) ||
+        (tnl_direct_selected[0].view.y != -4.0f) ||
+        (tnl_direct_selected[0].view.z != 5.0f) ||
+        (tnl_direct_selected[0].clip.x != 3.0f) ||
+        (tnl_direct_selected[0].clip.y != -4.0f) ||
+        (tnl_direct_selected[0].clip.z != 5.0f) ||
+        (tnl_direct_selected[0].projected[0] != 3.0f) ||
+        (tnl_direct_selected[0].projected[1] != -4.0f) ||
+        (tnl_direct_selected[0].projected[2] != 5.0f) ||
+        (tnl_direct_selected[0].clip_code != ((1u << 1) | (1u << 2) | (1u << 5))) ||
+        (tnl_direct_selected[0].valid != 1u)) {
+        pspDebugScreenPrintf("packed direct TnL failed\n");
+        return 1;
+    }
+
+    vertex.attribute[0] = 1;
+    direct_light.direction.x = 1.0f;
+    direct_light.direction.y = 0.0f;
+    direct_light.direction.z = 0.0f;
+    direct_light.direction.w = 0.0f;
+    direct_light.color.x = 4.0f;
+    direct_light.color.y = 5.0f;
+    direct_light.color.z = 6.0f;
+    direct_light.color.w = 0.0f;
+    matrices.modelview.m[0][0] = 0.03125f;
+    n64psp_tnl_transform_project_light_packed_batch(
+        &streams,
+        &matrices,
+        &vertex,
+        &direct_light,
+        &ambient,
+        1u,
+        1,
+        1u
+    );
+    if ((lighting_selected[0].x != ambient.x + direct_light.color.x) ||
+        (lighting_selected[0].y != ambient.y + direct_light.color.y) ||
+        (lighting_selected[0].z != ambient.z + direct_light.color.z) ||
+        (lighting_selected[0].w != 0.0f)) {
+        pspDebugScreenPrintf("packed direct lighting failed\n");
+        return 1;
+    }
+    matrices.modelview.m[0][0] = 1.0f;
+
+    n64psp_tnl_transform_project_packed_batch(
+        &streams,
+        &matrices,
+        &vertex,
+        0,
+        1u
+    );
+    if ((tnl_direct_selected[0].clip.w != 1.0f) ||
+        (tnl_direct_selected[0].clip_code != 0u) ||
+        (tnl_direct_selected[0].valid != 1u)) {
+        pspDebugScreenPrintf("packed direct unprojected TnL failed\n");
         return 1;
     }
 
