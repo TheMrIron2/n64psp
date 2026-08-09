@@ -1,4 +1,5 @@
 #include "n64psp/bridge.h"
+#include "n64psp/memory.h"
 #include "n64psp/platform.h"
 #include "n64psp/runtime.h"
 #include <stdint.h>
@@ -773,6 +774,42 @@ static int test_time(void) {
     return 0;
 }
 
+static int test_memory(void) {
+    static const size_t sizes[] = {0, 1, 15, 16, 127, 128, 129, 159, 160, 161, 288, 511};
+    static const size_t offsets[][2] = {{0, 0}, {1, 0}, {0, 3}, {5, 7}};
+    unsigned char src[544];
+    unsigned char dst[544];
+    size_t i;
+    size_t j;
+    size_t k;
+
+    for (i = 0; i < sizeof(src); i++) {
+        src[i] = (unsigned char)((i * 37u + 11u) & 0xffu);
+    }
+
+    for (i = 0; i < sizeof(offsets) / sizeof(offsets[0]); i++) {
+        for (j = 0; j < sizeof(sizes) / sizeof(sizes[0]); j++) {
+            size_t dst_offset = offsets[i][0];
+            size_t src_offset = offsets[i][1];
+            size_t size = sizes[j];
+
+            memset(dst, 0xa5, sizeof(dst));
+            CHECK(n64psp_memcpy(dst + dst_offset, src + src_offset, size) == dst + dst_offset);
+            for (k = 0; k < size; k++) {
+                CHECK(dst[dst_offset + k] == src[src_offset + k]);
+            }
+            for (k = 0; k < dst_offset; k++) {
+                CHECK(dst[k] == 0xa5);
+            }
+            for (k = dst_offset + size; k < sizeof(dst); k++) {
+                CHECK(dst[k] == 0xa5);
+            }
+        }
+    }
+
+    return 0;
+}
+
 static n64psp_result bounded_pi_read(void *userdata, uint32_t offset, void *dst, size_t size) {
     return n64psp_rom_read((const n64psp_rom *)userdata, offset, dst, size);
 }
@@ -842,6 +879,7 @@ int main(void) {
     CHECK(test_uncontended_path_uses_no_semaphores() == 0);
     CHECK(test_partial_creation_failure() == 0);
     CHECK(test_time() == 0);
+    CHECK(test_memory() == 0);
     CHECK(test_bridge() == 0);
     CHECK(test_task() == 0);
     CHECK(n64psp_runtime_shutdown() == N64PSP_OK);

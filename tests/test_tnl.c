@@ -18,6 +18,17 @@ enum {
     TEST_VERTEX_COUNT = 4
 };
 
+typedef struct TestDirectOutput {
+    uint32_t guard_before;
+    n64psp_vec4f view;
+    n64psp_vec4f clip;
+    float projected[3];
+    uint32_t clip_code;
+    uint32_t valid;
+    n64psp_vec4f lighting;
+    uint32_t guard_after;
+} TestDirectOutput;
+
 static int nearly_equal(float actual, float expected) {
     float difference = fabsf(actual - expected);
     float scale = fabsf(expected);
@@ -60,7 +71,27 @@ static int test_layout(void) {
     n64psp_tnl_transform_light_packed_batch(
         NULL, NULL, NULL, NULL, NULL, NULL, 0u, 0u
     );
+    n64psp_tnl_transform_project_packed_batch(
+        NULL, NULL, NULL, 0, 0u
+    );
+    n64psp_tnl_transform_project_light_packed_batch(
+        NULL, NULL, NULL, NULL, NULL, 0u, 0, 0u
+    );
     return 0;
+}
+
+static void init_direct_streams(
+    n64psp_tnl_output_streams* streams,
+    TestDirectOutput* output
+) {
+    streams->view = &output[0].view;
+    streams->clip = &output[0].clip;
+    streams->projected = &output[0].projected;
+    streams->lighting = &output[0].lighting;
+    streams->clip_code = &output[0].clip_code;
+    streams->valid = &output[0].valid;
+    streams->vertex_stride = sizeof(output[0]);
+    streams->lighting_stride = sizeof(output[0]);
 }
 
 static int test_transform_and_lighting(void) {
@@ -156,9 +187,107 @@ static int test_transform_and_lighting(void) {
     return 0;
 }
 
+static int test_direct_output(void) {
+    n64psp_packed_vertex vertices[3];
+    TestDirectOutput output[3];
+    n64psp_tnl_output_streams streams;
+    n64psp_tnl_matrices matrices;
+    n64psp_directional_lightf light;
+    n64psp_vec4f ambient;
+    size_t index;
+
+    memset(vertices, 0, sizeof(vertices));
+    memset(output, 0x5a, sizeof(output));
+    matrices.modelview = identity_matrix();
+    matrices.projection = identity_matrix();
+    vertices[0].position[0] = 1;
+    vertices[0].position[1] = -2;
+    vertices[0].position[2] = 3;
+    vertices[1].position[0] = 2;
+    vertices[1].position[1] = 0;
+    vertices[1].position[2] = 0;
+    vertices[2].position[0] = -4;
+    matrices.projection.m[3][3] = 0.0f;
+    init_direct_streams(&streams, output);
+
+    n64psp_tnl_transform_project_packed_batch(
+        &streams,
+        &matrices,
+        vertices,
+        1,
+        3u
+    );
+
+    for (index = 0u; index < 3u; ++index) {
+        CHECK(output[index].guard_before == 0x5a5a5a5au);
+        CHECK(output[index].guard_after == 0x5a5a5a5au);
+        CHECK(output[index].valid == 0u);
+    }
+    CHECK(output[0].view.x == 1.0f);
+    CHECK(output[0].view.y == -2.0f);
+    CHECK(output[0].view.z == 3.0f);
+
+    matrices.projection = identity_matrix();
+    memset(output, 0x5a, sizeof(output));
+    ambient.x = 11.0f;
+    ambient.y = 22.0f;
+    ambient.z = 33.0f;
+    ambient.w = 0.0f;
+    vertices[0].attribute[0] = 1;
+    light.direction.x = 1.0f;
+    light.direction.y = 0.0f;
+    light.direction.z = 0.0f;
+    light.direction.w = 0.0f;
+    light.color.x = 4.0f;
+    light.color.y = 5.0f;
+    light.color.z = 6.0f;
+    light.color.w = 0.0f;
+    matrices.modelview.m[0][0] = 0.03125f;
+    n64psp_tnl_transform_project_light_packed_batch(
+        &streams,
+        &matrices,
+        vertices,
+        &light,
+        &ambient,
+        1u,
+        1,
+        3u
+    );
+    CHECK(output[0].valid == 1u);
+    CHECK(nearly_equal(output[0].projected[0], 0.03125f));
+    CHECK(output[0].projected[1] == -2.0f);
+    CHECK(output[0].projected[2] == 3.0f);
+    CHECK(output[0].clip_code == ((1u << 2) | (1u << 5)));
+    CHECK(output[0].lighting.x == ambient.x + light.color.x);
+    CHECK(output[0].lighting.y == ambient.y + light.color.y);
+    CHECK(output[0].lighting.z == ambient.z + light.color.z);
+    CHECK(output[0].lighting.w == 0.0f);
+
+    matrices.modelview = identity_matrix();
+    memset(output, 0x5a, sizeof(output));
+    n64psp_tnl_transform_project_packed_batch(
+        &streams,
+        &matrices,
+        vertices,
+        0,
+        3u
+    );
+    CHECK(output[0].valid == 1u);
+    CHECK(nearly_equal(output[0].projected[0], 1.0f / 320.0f));
+    CHECK(nearly_equal(output[0].projected[1], 2.0f / 240.0f));
+    CHECK(nearly_equal(output[0].projected[2], 3.0f / 4096.0f));
+    CHECK(output[0].clip.x == output[0].projected[0]);
+    CHECK(output[0].clip.y == output[0].projected[1]);
+    CHECK(output[0].clip.z == output[0].projected[2]);
+    CHECK(output[0].clip.w == 1.0f);
+    CHECK(output[0].clip_code == 0u);
+    return 0;
+}
+
 int main(void) {
     CHECK(test_layout() == 0);
     CHECK(test_transform_and_lighting() == 0);
+    CHECK(test_direct_output() == 0);
     puts("n64psp packed TnL tests passed");
     return 0;
 }

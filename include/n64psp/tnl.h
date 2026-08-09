@@ -24,6 +24,17 @@ typedef struct N64PSP_ALIGN16 n64psp_tnl_matrices {
     n64psp_mat4f projection;
 } n64psp_tnl_matrices;
 
+typedef struct n64psp_tnl_output_streams {
+    void* view;
+    void* clip;
+    void* projected;
+    void* lighting;
+    void* clip_code;
+    void* valid;
+    size_t vertex_stride;
+    size_t lighting_stride;
+} n64psp_tnl_output_streams;
+
 /*
  * Transforms native-endian packed N64 vertices without an unpack pass
  *
@@ -51,6 +62,40 @@ void n64psp_tnl_transform_light_packed_batch(
     const n64psp_directional_lightf* lights,
     const n64psp_vec4f* ambient,
     size_t light_count,
+    size_t count
+);
+
+/*
+ * Transforms packed vertices directly into strided renderer-owned streams
+ *
+ * View and clip contain four floats, projected contains three floats and
+ * clip_code and valid contain one uint32_t for each vertex
+ * Vertex streams and vertex_stride must be 4-byte aligned
+ * Matrices must be 16-byte aligned
+ */
+void n64psp_tnl_transform_project_packed_batch(
+    const n64psp_tnl_output_streams* output,
+    const n64psp_tnl_matrices* matrices,
+    const void* packed_vertices,
+    int has_projection,
+    size_t count
+);
+
+/*
+ * Transforms and lights packed vertices directly into strided streams
+ *
+ * Lighting contains four floats and advances by lighting_stride
+ * Lighting, lights, ambient and lighting_stride must be 16-byte aligned
+ * The unlit alignment and packed-vertex requirements also apply
+ */
+void n64psp_tnl_transform_project_light_packed_batch(
+    const n64psp_tnl_output_streams* output,
+    const n64psp_tnl_matrices* matrices,
+    const void* packed_vertices,
+    const n64psp_directional_lightf* lights,
+    const n64psp_vec4f* ambient,
+    size_t light_count,
+    int has_projection,
     size_t count
 );
 

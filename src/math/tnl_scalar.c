@@ -93,6 +93,78 @@ static void n64psp_tnl_light_vertex(
     output->w = 0.0f;
 }
 
+static uint32_t n64psp_tnl_clip_code(const n64psp_vec4f* clip) {
+    uint32_t code = 0u;
+
+    if (clip->x < -clip->w) {
+        code |= 1u << 0;
+    }
+    if (clip->x > clip->w) {
+        code |= 1u << 1;
+    }
+    if (clip->y < -clip->w) {
+        code |= 1u << 2;
+    }
+    if (clip->y > clip->w) {
+        code |= 1u << 3;
+    }
+    if (clip->z < -clip->w) {
+        code |= 1u << 4;
+    }
+    if (clip->z > clip->w) {
+        code |= 1u << 5;
+    }
+    return code;
+}
+
+static void n64psp_tnl_store_projected_vertex(
+    const n64psp_tnl_output_streams* output,
+    size_t index,
+    const n64psp_vec4f_pair* transform,
+    int has_projection
+) {
+    unsigned char* view = (unsigned char*)output->view + index * output->vertex_stride;
+    unsigned char* clip = (unsigned char*)output->clip + index * output->vertex_stride;
+    unsigned char* projected = (unsigned char*)output->projected + index * output->vertex_stride;
+    unsigned char* clip_code = (unsigned char*)output->clip_code + index * output->vertex_stride;
+    unsigned char* valid = (unsigned char*)output->valid + index * output->vertex_stride;
+    n64psp_vec4f final_clip;
+    float projected_xyz[3];
+    uint32_t final_code;
+    uint32_t final_valid;
+
+    memcpy(view, &transform->first, sizeof(transform->first));
+
+    if (has_projection) {
+        if ((transform->second.w > -0.001f) &&
+            (transform->second.w < 0.001f)) {
+            final_valid = 0u;
+            memcpy(valid, &final_valid, sizeof(final_valid));
+            return;
+        }
+
+        final_clip = transform->second;
+        projected_xyz[0] = final_clip.x / final_clip.w;
+        projected_xyz[1] = final_clip.y / final_clip.w;
+        projected_xyz[2] = final_clip.z / final_clip.w;
+    } else {
+        projected_xyz[0] = transform->first.x / 320.0f;
+        projected_xyz[1] = -transform->first.y / 240.0f;
+        projected_xyz[2] = transform->first.z / 4096.0f;
+        final_clip.x = projected_xyz[0];
+        final_clip.y = projected_xyz[1];
+        final_clip.z = projected_xyz[2];
+        final_clip.w = 1.0f;
+    }
+
+    final_code = n64psp_tnl_clip_code(&final_clip);
+    final_valid = 1u;
+    memcpy(clip, &final_clip, sizeof(final_clip));
+    memcpy(projected, projected_xyz, sizeof(projected_xyz));
+    memcpy(clip_code, &final_code, sizeof(final_code));
+    memcpy(valid, &final_valid, sizeof(final_valid));
+}
+
 void n64psp_tnl_transform_packed_batch_scalar(
     n64psp_vec4f_pair* output,
     const n64psp_tnl_matrices* matrices,
@@ -136,5 +208,70 @@ void n64psp_tnl_transform_light_packed_batch_scalar(
             ambient,
             light_count
         );
+    }
+}
+
+void n64psp_tnl_transform_project_packed_batch_scalar(
+    const n64psp_tnl_output_streams* output,
+    const n64psp_tnl_matrices* matrices,
+    const void* packed_vertices,
+    int has_projection,
+    size_t count
+) {
+    const unsigned char* input = (const unsigned char*)packed_vertices;
+    size_t index;
+
+    for (index = 0u; index < count; ++index) {
+        n64psp_packed_vertex vertex;
+        n64psp_vec4f_pair transform;
+
+        n64psp_tnl_load_vertex(&vertex, input, index);
+        n64psp_tnl_transform_vertex(&transform, matrices, &vertex);
+        n64psp_tnl_store_projected_vertex(
+            output,
+            index,
+            &transform,
+            has_projection
+        );
+    }
+}
+
+void n64psp_tnl_transform_project_light_packed_batch_scalar(
+    const n64psp_tnl_output_streams* output,
+    const n64psp_tnl_matrices* matrices,
+    const void* packed_vertices,
+    const n64psp_directional_lightf* lights,
+    const n64psp_vec4f* ambient,
+    size_t light_count,
+    int has_projection,
+    size_t count
+) {
+    const unsigned char* input = (const unsigned char*)packed_vertices;
+    size_t index;
+
+    for (index = 0u; index < count; ++index) {
+        unsigned char* lighting =
+            (unsigned char*)output->lighting + index * output->lighting_stride;
+        n64psp_packed_vertex vertex;
+        n64psp_vec4f_pair transform;
+        n64psp_vec4f light;
+
+        n64psp_tnl_load_vertex(&vertex, input, index);
+        n64psp_tnl_transform_vertex(&transform, matrices, &vertex);
+        n64psp_tnl_store_projected_vertex(
+            output,
+            index,
+            &transform,
+            has_projection
+        );
+        n64psp_tnl_light_vertex(
+            &light,
+            &matrices->modelview,
+            &vertex,
+            lights,
+            ambient,
+            light_count
+        );
+        memcpy(lighting, &light, sizeof(light));
     }
 }
