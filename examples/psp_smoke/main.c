@@ -1,4 +1,5 @@
 #include "n64psp/bridge.h"
+#include "n64psp/memory.h"
 #include "n64psp/platform.h"
 #include "n64psp/runtime.h"
 #include "math_smoke.h"
@@ -127,6 +128,50 @@ typedef struct psp_thread_case {
 static int psp_send_thread(void *userdata) {
     psp_thread_case *tc = (psp_thread_case *)userdata;
     return osSendMesg(tc->queue, tc->value, OS_MESG_BLOCK);
+}
+
+static int run_psp_memory_smoke(void) {
+    static unsigned char src[544] __attribute__((aligned(16)));
+    static unsigned char dst[544] __attribute__((aligned(16)));
+    static const size_t sizes[] = {0, 1, 127, 128, 129, 159, 160, 161, 288, 511};
+    static const size_t offsets[][2] = {{0, 0}, {1, 0}, {0, 3}, {5, 7}};
+    size_t i;
+    size_t j;
+    size_t k;
+
+    for (i = 0; i < sizeof(src); i++) {
+        src[i] = (unsigned char)((i * 37u + 11u) & 0xffu);
+    }
+
+    for (i = 0; i < sizeof(offsets) / sizeof(offsets[0]); i++) {
+        for (j = 0; j < sizeof(sizes) / sizeof(sizes[0]); j++) {
+            size_t dst_offset = offsets[i][0];
+            size_t src_offset = offsets[i][1];
+            size_t size = sizes[j];
+
+            memset(dst, 0xa5, sizeof(dst));
+            if (n64psp_memcpy(dst + dst_offset, src + src_offset, size) != dst + dst_offset) {
+                return 1;
+            }
+            for (k = 0; k < size; k++) {
+                if (dst[dst_offset + k] != src[src_offset + k]) {
+                    return 1;
+                }
+            }
+            for (k = 0; k < dst_offset; k++) {
+                if (dst[k] != 0xa5) {
+                    return 1;
+                }
+            }
+            for (k = dst_offset + size; k < sizeof(dst); k++) {
+                if (dst[k] != 0xa5) {
+                    return 1;
+                }
+            }
+        }
+    }
+
+    return 0;
 }
 
 #if N64PSP_PSP_BENCHMARKS
@@ -301,14 +346,18 @@ int main(void) {
         pspDebugScreenPrintf("math smoke failed\n");
         return smoke_exit_game(6);
     }
+    if (run_psp_memory_smoke() != 0) {
+        pspDebugScreenPrintf("memory smoke failed\n");
+        return smoke_exit_game(7);
+    }
 #if N64PSP_PSP_BENCHMARKS
     if (run_psp_queue_benchmark() != 0) {
         pspDebugScreenPrintf("queue benchmark failed\n");
-        return smoke_exit_game(7);
+        return smoke_exit_game(8);
     }
     if (run_psp_pingpong_benchmark(&platform) != 0) {
         pspDebugScreenPrintf("queue pingpong benchmark failed\n");
-        return smoke_exit_game(8);
+        return smoke_exit_game(9);
     }
 #endif
     n64psp_runtime_shutdown();

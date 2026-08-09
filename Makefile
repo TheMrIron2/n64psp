@@ -41,9 +41,11 @@ MATH_SOURCES := \
 	src/math/tnl_scalar.c
 
 PSP_PLATFORM_SOURCES := \
+	src/platform/psp/memory_psp.c \
 	src/platform/psp/platform_psp.c
 
 HOST_PLATFORM_SOURCES := \
+	src/platform/host/memory_host.c \
 	src/platform/host/platform_host.c
 
 PSP_MATH_ASM_SOURCES :=
@@ -222,6 +224,8 @@ $(BUILD_PSP)/%.o: %.c $(PSP_COMPILE_FLAGS_STAMP)
 $(BUILD_PSP)/%.o: %.S $(PSP_COMPILE_FLAGS_STAMP)
 	@mkdir -p $(@D)
 	$(PSP_CC) $(PSP_CFLAGS) -c $< -o $@
+
+$(BUILD_PSP)/src/platform/psp/memory_psp.o: include/n64psp/memory.h include/n64psp/detail/memory_psp_impl.h
 
 $(BUILD_PSP)/libn64psp_runtime.a: $(PSP_RUNTIME_OBJECTS)
 	$(PSP_AR) rcs $@ $^
