@@ -19,6 +19,16 @@ typedef struct n64psp_packed_vertex {
     uint8_t alpha;
 } n64psp_packed_vertex;
 
+typedef struct n64psp_texcoord_s10_5 {
+    int16_t s;
+    int16_t t;
+} n64psp_texcoord_s10_5;
+
+typedef enum n64psp_texgen_mode {
+    N64PSP_TEXGEN_SPHERICAL,
+    N64PSP_TEXGEN_LINEAR
+} n64psp_texgen_mode;
+
 typedef struct N64PSP_ALIGN16 n64psp_tnl_matrices {
     n64psp_mat4f modelview;
     n64psp_mat4f projection;
@@ -96,6 +106,16 @@ void n64psp_tnl_transform_project_light_packed_batch(
     const n64psp_vec4f* ambient,
     size_t light_count,
     int has_projection,
+    size_t count
+);
+
+/* Generates N64 S10.5 texture coordinates from modelview-transformed normals
+ * Spherical maps signed X/Y while linear maps acos X/Y over pi */
+void n64psp_texgen_snorm8_batch(
+    n64psp_texcoord_s10_5* output,
+    const n64psp_mat4f* modelview,
+    const void* packed_vertices,
+    n64psp_texgen_mode mode,
     size_t count
 );
 

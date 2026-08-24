@@ -135,3 +135,19 @@ void n64psp_tnl_transform_project_light_packed_batch(
     );
 #endif
 }
+
+void n64psp_texgen_snorm8_batch(
+    n64psp_texcoord_s10_5* output,
+    const n64psp_mat4f* modelview,
+    const void* packed_vertices,
+    n64psp_texgen_mode mode,
+    size_t count
+) {
+    n64psp_texgen_snorm8_batch_scalar(
+        output,
+        modelview,
+        packed_vertices,
+        mode,
+        count
+    );
+}

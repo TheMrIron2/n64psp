@@ -40,6 +40,14 @@ void n64psp_tnl_transform_project_light_packed_batch_scalar(
     size_t count
 );
 
+void n64psp_texgen_snorm8_batch_scalar(
+    n64psp_texcoord_s10_5* output,
+    const n64psp_mat4f* modelview,
+    const void* packed_vertices,
+    n64psp_texgen_mode mode,
+    size_t count
+);
+
 #if defined(__PSP__) && N64PSP_USE_VFPU
 void n64psp_tnl_transform_packed_batch_vfpu(
     n64psp_vec4f_pair* output,

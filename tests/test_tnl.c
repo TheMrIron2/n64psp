@@ -77,6 +77,67 @@ static int test_layout(void) {
     n64psp_tnl_transform_project_light_packed_batch(
         NULL, NULL, NULL, NULL, NULL, 0u, 0, 0u
     );
+    n64psp_texgen_snorm8_batch(
+        NULL, NULL, NULL, N64PSP_TEXGEN_SPHERICAL, 0u
+    );
+    return 0;
+}
+
+static int test_texture_generation(void) {
+    n64psp_packed_vertex vertices[4];
+    n64psp_texcoord_s10_5 output[4];
+    n64psp_mat4f modelview = identity_matrix();
+
+    memset(vertices, 0, sizeof(vertices));
+    vertices[0].attribute[0] = 127;
+    vertices[1].attribute[0] = -127;
+    vertices[2].attribute[1] = 127;
+    vertices[3].attribute[0] = 1;
+    vertices[3].attribute[1] = 1;
+
+    n64psp_texgen_snorm8_batch(
+        output,
+        &modelview,
+        vertices,
+        N64PSP_TEXGEN_SPHERICAL,
+        4u
+    );
+    CHECK(output[0].s == 32767);
+    CHECK(output[0].t == 16384);
+    CHECK(output[1].s == 0);
+    CHECK(output[1].t == 16384);
+    CHECK(output[2].s == 16384);
+    CHECK(output[2].t == 32767);
+    CHECK(output[3].s > 27900 && output[3].s < 28000);
+    CHECK(output[3].t == output[3].s);
+
+    n64psp_texgen_snorm8_batch(
+        output,
+        &modelview,
+        vertices,
+        N64PSP_TEXGEN_LINEAR,
+        3u
+    );
+    CHECK(output[0].s == 0);
+    CHECK(output[0].t == 16384);
+    CHECK(output[1].s == 32767);
+    CHECK(output[1].t == 16384);
+    CHECK(output[2].s == 16384);
+    CHECK(output[2].t == 0);
+
+    modelview.m[0][0] = 0.0f;
+    modelview.m[0][1] = 1.0f;
+    modelview.m[1][0] = -1.0f;
+    modelview.m[1][1] = 0.0f;
+    n64psp_texgen_snorm8_batch(
+        output,
+        &modelview,
+        vertices,
+        N64PSP_TEXGEN_SPHERICAL,
+        1u
+    );
+    CHECK(output[0].s == 16384);
+    CHECK(output[0].t == 32767);
     return 0;
 }
 
@@ -288,6 +349,7 @@ int main(void) {
     CHECK(test_layout() == 0);
     CHECK(test_transform_and_lighting() == 0);
     CHECK(test_direct_output() == 0);
+    CHECK(test_texture_generation() == 0);
     puts("n64psp packed TnL tests passed");
     return 0;
 }
