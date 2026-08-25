@@ -92,8 +92,8 @@ static int test_texture_generation(void) {
     vertices[0].attribute[0] = 127;
     vertices[1].attribute[0] = -127;
     vertices[2].attribute[1] = 127;
-    vertices[3].attribute[0] = 1;
-    vertices[3].attribute[1] = 1;
+    vertices[3].attribute[0] = 90;
+    vertices[3].attribute[1] = 90;
 
     n64psp_texgen_snorm8_batch(
         output,
@@ -102,13 +102,13 @@ static int test_texture_generation(void) {
         N64PSP_TEXGEN_SPHERICAL,
         4u
     );
-    CHECK(output[0].s == 32767);
-    CHECK(output[0].t == 16384);
-    CHECK(output[1].s == 0);
-    CHECK(output[1].t == 16384);
-    CHECK(output[2].s == 16384);
-    CHECK(output[2].t == 32767);
-    CHECK(output[3].s > 27900 && output[3].s < 28000);
+    CHECK(output[0].s == 16384);
+    CHECK(output[0].t == 32767);
+    CHECK(output[1].s == 16384);
+    CHECK(output[1].t == 0);
+    CHECK(output[2].s == 32767);
+    CHECK(output[2].t == 16384);
+    CHECK(output[3].s > 27800 && output[3].s < 28100);
     CHECK(output[3].t == output[3].s);
 
     n64psp_texgen_snorm8_batch(
@@ -118,12 +118,12 @@ static int test_texture_generation(void) {
         N64PSP_TEXGEN_LINEAR,
         3u
     );
-    CHECK(output[0].s == 0);
-    CHECK(output[0].t == 16384);
-    CHECK(output[1].s == 32767);
-    CHECK(output[1].t == 16384);
-    CHECK(output[2].s == 16384);
-    CHECK(output[2].t == 0);
+    CHECK(output[0].s == 16384);
+    CHECK(output[0].t == 32767);
+    CHECK(output[1].s == 16384);
+    CHECK(output[1].t == 0);
+    CHECK(output[2].s == 32767);
+    CHECK(output[2].t == 16384);
 
     modelview.m[0][0] = 0.0f;
     modelview.m[0][1] = 1.0f;
@@ -136,8 +136,8 @@ static int test_texture_generation(void) {
         N64PSP_TEXGEN_SPHERICAL,
         1u
     );
-    CHECK(output[0].s == 16384);
-    CHECK(output[0].t == 32767);
+    CHECK(output[0].s == 0);
+    CHECK(output[0].t == 16384);
     return 0;
 }
 
