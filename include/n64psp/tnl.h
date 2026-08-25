@@ -109,8 +109,8 @@ void n64psp_tnl_transform_project_light_packed_batch(
     size_t count
 );
 
-/* Generates N64 S10.5 texture coordinates from modelview-transformed normals
- * Spherical maps signed X/Y while linear maps acos X/Y over pi */
+/* Generates N64 S10.5 coordinates using transformed Y/X look-at vectors
+ * Spherical maps dot products while linear maps acos of negative dots */
 void n64psp_texgen_snorm8_batch(
     n64psp_texcoord_s10_5* output,
     const n64psp_mat4f* modelview,

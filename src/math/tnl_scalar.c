@@ -277,7 +277,7 @@ void n64psp_tnl_transform_project_light_packed_batch_scalar(
 }
 
 static int16_t n64psp_texgen_to_s10_5(float value) {
-    float scaled = value * 32768.0f;
+    float scaled = value * 65536.0f;
 
     if (scaled <= 0.0f) {
         return 0;
@@ -296,55 +296,82 @@ void n64psp_texgen_snorm8_batch_scalar(
     size_t count
 ) {
     const unsigned char* input = (const unsigned char*)packed_vertices;
-    const float inverse_pi = 0.3183098861837907f;
+    const float inverse_two_pi = 0.15915494309189535f;
+    float look_s_x;
+    float look_s_y;
+    float look_s_z;
+    float look_t_x;
+    float look_t_y;
+    float look_t_z;
+    float look_s_length_squared;
+    float look_t_length_squared;
     size_t index;
+
+    if (count == 0u) {
+        return;
+    }
+
+    look_s_x = modelview->m[1][0];
+    look_s_y = modelview->m[1][1];
+    look_s_z = modelview->m[1][2];
+    look_t_x = modelview->m[0][0];
+    look_t_y = modelview->m[0][1];
+    look_t_z = modelview->m[0][2];
+    look_s_length_squared =
+        look_s_x * look_s_x + look_s_y * look_s_y + look_s_z * look_s_z;
+    look_t_length_squared =
+        look_t_x * look_t_x + look_t_y * look_t_y + look_t_z * look_t_z;
+
+    if (look_s_length_squared > 0.000001f) {
+        float inverse_length = 1.0f / sqrtf(look_s_length_squared);
+
+        look_s_x *= inverse_length;
+        look_s_y *= inverse_length;
+        look_s_z *= inverse_length;
+    }
+    if (look_t_length_squared > 0.000001f) {
+        float inverse_length = 1.0f / sqrtf(look_t_length_squared);
+
+        look_t_x *= inverse_length;
+        look_t_y *= inverse_length;
+        look_t_z *= inverse_length;
+    }
 
     for (index = 0u; index < count; ++index) {
         n64psp_packed_vertex vertex;
-        float nx;
-        float ny;
-        float nz;
-        float length_squared;
+        float dot_s;
+        float dot_t;
         float s;
         float t;
 
         n64psp_tnl_load_vertex(&vertex, input, index);
-        nx =
-            modelview->m[0][0] * (float)vertex.attribute[0] +
-            modelview->m[1][0] * (float)vertex.attribute[1] +
-            modelview->m[2][0] * (float)vertex.attribute[2];
-        ny =
-            modelview->m[0][1] * (float)vertex.attribute[0] +
-            modelview->m[1][1] * (float)vertex.attribute[1] +
-            modelview->m[2][1] * (float)vertex.attribute[2];
-        nz =
-            modelview->m[0][2] * (float)vertex.attribute[0] +
-            modelview->m[1][2] * (float)vertex.attribute[1] +
-            modelview->m[2][2] * (float)vertex.attribute[2];
-        length_squared = nx * nx + ny * ny + nz * nz;
-        if (length_squared > 0.000001f) {
-            float inverse_length = 1.0f / sqrtf(length_squared);
-
-            nx *= inverse_length;
-            ny *= inverse_length;
+        dot_s = (
+            (float)vertex.attribute[0] * look_s_x +
+            (float)vertex.attribute[1] * look_s_y +
+            (float)vertex.attribute[2] * look_s_z
+        ) / 127.0f;
+        dot_t = (
+            (float)vertex.attribute[0] * look_t_x +
+            (float)vertex.attribute[1] * look_t_y +
+            (float)vertex.attribute[2] * look_t_z
+        ) / 127.0f;
+        if (dot_s < -1.0f) {
+            dot_s = -1.0f;
+        } else if (dot_s > 1.0f) {
+            dot_s = 1.0f;
         }
-        if (nx < -1.0f) {
-            nx = -1.0f;
-        } else if (nx > 1.0f) {
-            nx = 1.0f;
-        }
-        if (ny < -1.0f) {
-            ny = -1.0f;
-        } else if (ny > 1.0f) {
-            ny = 1.0f;
+        if (dot_t < -1.0f) {
+            dot_t = -1.0f;
+        } else if (dot_t > 1.0f) {
+            dot_t = 1.0f;
         }
 
         if (mode == N64PSP_TEXGEN_LINEAR) {
-            s = acosf(nx) * inverse_pi;
-            t = acosf(ny) * inverse_pi;
+            s = acosf(-dot_s) * inverse_two_pi;
+            t = acosf(-dot_t) * inverse_two_pi;
         } else {
-            s = 0.5f * (1.0f + nx);
-            t = 0.5f * (1.0f + ny);
+            s = 0.25f * (1.0f + dot_s);
+            t = 0.25f * (1.0f + dot_t);
         }
         output[index].s = n64psp_texgen_to_s10_5(s);
         output[index].t = n64psp_texgen_to_s10_5(t);
