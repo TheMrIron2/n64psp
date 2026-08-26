@@ -33,6 +33,7 @@ COMMON_SOURCES := \
 	src/renderer/trace_backend.c
 
 MATH_SOURCES := \
+	src/math/fog_scalar.c \
 	src/math/math_api.c \
 	src/math/math_scalar.c \
 	src/math/lighting_api.c \
@@ -167,6 +168,9 @@ HOST_LIGHTING_TEST_OBJECT := \
 HOST_TNL_TEST_OBJECT := \
 	$(BUILD_HOST)/tests/test_tnl.o
 
+HOST_FOG_TEST_OBJECT := \
+	$(BUILD_HOST)/tests/test_fog.o
+
 HOST_SMOKE_OBJECTS := \
 	$(patsubst %.c,$(BUILD_HOST)/%.o,$(HOST_SOURCES) examples/host_smoke/main.c)
 
@@ -197,6 +201,7 @@ HOST_LDLIBS := -pthread -lm
 	test-runtime \
 	test-math \
 	test-lighting \
+	test-fog \
 	test-tnl \
 	smoke-host \
 	benchmark-host \
@@ -304,6 +309,14 @@ $(BUILD_HOST)/n64psp_tnl_tests: \
 		$(BUILD_HOST)/libn64psp_math.a \
 		$(HOST_LDLIBS)
 
+$(BUILD_HOST)/n64psp_fog_tests: \
+	$(HOST_FOG_TEST_OBJECT) \
+	$(BUILD_HOST)/libn64psp_math.a
+	$(HOST_CC) -o $@ \
+		$(HOST_FOG_TEST_OBJECT) \
+		$(BUILD_HOST)/libn64psp_math.a \
+		$(HOST_LDLIBS)
+
 $(BUILD_HOST)/n64psp_host_smoke: $(HOST_SMOKE_OBJECTS)
 	$(HOST_CC) -o $@ $^ $(HOST_LDLIBS)
 
@@ -319,10 +332,13 @@ test-math: $(BUILD_HOST)/n64psp_math_tests
 test-lighting: $(BUILD_HOST)/n64psp_lighting_tests
 	./$(BUILD_HOST)/n64psp_lighting_tests
 
+test-fog: $(BUILD_HOST)/n64psp_fog_tests
+	./$(BUILD_HOST)/n64psp_fog_tests
+
 test-tnl: $(BUILD_HOST)/n64psp_tnl_tests
 	./$(BUILD_HOST)/n64psp_tnl_tests
 
-test: test-runtime test-math test-lighting test-tnl
+test: test-runtime test-math test-lighting test-fog test-tnl
 
 smoke-host: $(BUILD_HOST)/n64psp_host_smoke
 	./$(BUILD_HOST)/n64psp_host_smoke
