@@ -26,6 +26,7 @@ PSPDEV ?= $(shell $(PSP_CONFIG) --pspdev-path)
 PSPSDK ?= $(shell $(PSP_CONFIG) --pspsdk-path)
 
 COMMON_SOURCES := \
+	src/runtime/display.c \
 	src/runtime/message_queue.c \
 	src/runtime/result.c \
 	src/runtime/runtime.c \
@@ -168,6 +169,10 @@ HOST_LIGHTING_TEST_OBJECT := \
 HOST_TNL_TEST_OBJECT := \
 	$(BUILD_HOST)/tests/test_tnl.o
 
+HOST_DISPLAY_TEST_OBJECTS := \
+	$(BUILD_HOST)/tests/test_display.o \
+	$(BUILD_HOST)/src/runtime/display.o
+
 HOST_FOG_TEST_OBJECT := \
 	$(BUILD_HOST)/tests/test_fog.o
 
@@ -203,6 +208,7 @@ HOST_LDLIBS := -pthread -lm
 	test-lighting \
 	test-fog \
 	test-tnl \
+	test-display \
 	smoke-host \
 	benchmark-host \
 	inspect-psp \
@@ -317,6 +323,9 @@ $(BUILD_HOST)/n64psp_fog_tests: \
 		$(BUILD_HOST)/libn64psp_math.a \
 		$(HOST_LDLIBS)
 
+$(BUILD_HOST)/n64psp_display_tests: $(HOST_DISPLAY_TEST_OBJECTS)
+	$(HOST_CC) -o $@ $^
+
 $(BUILD_HOST)/n64psp_host_smoke: $(HOST_SMOKE_OBJECTS)
 	$(HOST_CC) -o $@ $^ $(HOST_LDLIBS)
 
@@ -338,7 +347,10 @@ test-fog: $(BUILD_HOST)/n64psp_fog_tests
 test-tnl: $(BUILD_HOST)/n64psp_tnl_tests
 	./$(BUILD_HOST)/n64psp_tnl_tests
 
-test: test-runtime test-math test-lighting test-fog test-tnl
+test: test-runtime test-math test-lighting test-fog test-tnl test-display
+
+test-display: $(BUILD_HOST)/n64psp_display_tests
+	./$(BUILD_HOST)/n64psp_display_tests
 
 smoke-host: $(BUILD_HOST)/n64psp_host_smoke
 	./$(BUILD_HOST)/n64psp_host_smoke

@@ -1,5 +1,7 @@
 # Compatibility
 
+`n64psp/display.h` provides backend-neutral logical, surface, viewport, and projection-aspect policy for original, 4:3, and widescreen presentation modes.
+
 ## Runtime APIs
 
 | API | Status | Notes |
