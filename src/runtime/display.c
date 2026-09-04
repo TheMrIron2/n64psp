@@ -1,5 +1,7 @@
 #include "n64psp/display.h"
 
+#include <math.h>
+
 #define N64PSP_DISPLAY_LOGICAL_WIDTH 320.0f
 #define N64PSP_DISPLAY_LOGICAL_HEIGHT 240.0f
 
@@ -82,6 +84,7 @@ int n64psp_display_configure(n64psp_display_config *config, n64psp_display_mode 
     config->ui_viewport_y = description->ui_viewport_y;
     config->ui_viewport_width = description->ui_viewport_width;
     config->ui_viewport_height = description->ui_viewport_height;
+    /* Anamorphic display aspect is independent of framebuffer aspect */
     config->display_aspect = description->display_aspect;
     config->logical_height = N64PSP_DISPLAY_LOGICAL_HEIGHT;
     config->logical_width = config->logical_height * config->display_aspect;
@@ -94,4 +97,48 @@ int n64psp_display_configure(n64psp_display_config *config, n64psp_display_mode 
                                : 1.0f;
     config->anamorphic = description->anamorphic;
     return 1;
+}
+
+float n64psp_ui_from_left(const n64psp_display_config *config, float x) {
+    return x - config->side_extension;
+}
+
+float n64psp_ui_from_right(const n64psp_display_config *config, float x) {
+    return x + config->side_extension;
+}
+
+float n64psp_ui_centered(float x) {
+    return x;
+}
+
+float n64psp_ui_to_framebuffer_x(const n64psp_display_config *config, float x) {
+    return (float)config->viewport_x + (x + config->side_extension) * config->scale_x;
+}
+
+float n64psp_ui_to_framebuffer_y(const n64psp_display_config *config, float y) {
+    return (float)config->viewport_y + y * config->scale_y;
+}
+
+int n64psp_ui_pixel_x(const n64psp_display_config *config, float x) {
+    return (int)lroundf(n64psp_ui_to_framebuffer_x(config, x));
+}
+
+int n64psp_ui_pixel_y(const n64psp_display_config *config, float y) {
+    return (int)lroundf(n64psp_ui_to_framebuffer_y(config, y));
+}
+
+int n64psp_ui_left_edge(const n64psp_display_config *config, float x) {
+    return (int)floorf(n64psp_ui_to_framebuffer_x(config, x));
+}
+
+int n64psp_ui_right_edge(const n64psp_display_config *config, float x) {
+    return (int)ceilf(n64psp_ui_to_framebuffer_x(config, x));
+}
+
+int n64psp_ui_top_edge(const n64psp_display_config *config, float y) {
+    return (int)floorf(n64psp_ui_to_framebuffer_y(config, y));
+}
+
+int n64psp_ui_bottom_edge(const n64psp_display_config *config, float y) {
+    return (int)ceilf(n64psp_ui_to_framebuffer_y(config, y));
 }

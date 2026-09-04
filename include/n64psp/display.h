@@ -47,4 +47,17 @@ typedef struct n64psp_display_config {
 
 int n64psp_display_configure(n64psp_display_config *config, n64psp_display_mode mode);
 
+/* Semantic layout remains logical until framebuffer mapping */
+float n64psp_ui_from_left(const n64psp_display_config *config, float x);
+float n64psp_ui_from_right(const n64psp_display_config *config, float x);
+float n64psp_ui_centered(float x);
+float n64psp_ui_to_framebuffer_x(const n64psp_display_config *config, float x);
+float n64psp_ui_to_framebuffer_y(const n64psp_display_config *config, float y);
+int n64psp_ui_pixel_x(const n64psp_display_config *config, float x);
+int n64psp_ui_pixel_y(const n64psp_display_config *config, float y);
+int n64psp_ui_left_edge(const n64psp_display_config *config, float x);
+int n64psp_ui_right_edge(const n64psp_display_config *config, float x);
+int n64psp_ui_top_edge(const n64psp_display_config *config, float y);
+int n64psp_ui_bottom_edge(const n64psp_display_config *config, float y);
+
 #endif

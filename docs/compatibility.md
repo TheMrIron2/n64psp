@@ -2,6 +2,8 @@
 
 `n64psp/display.h` provides backend-neutral framebuffer, viewport, display-aspect, pixel-aspect and logical-canvas policy. It describes 320x240, near-4:3 362x272 and full 480x272 PSP LCD modes plus 720x480 4:3 and anamorphic 16:9 TV layouts. TV scanout is not implemented.
 
+The display API also provides semantic left, right and centered UI placement, logical-to-framebuffer mapping and explicit nearest or outward edge snapping.
+
 ## Runtime APIs
 
 | API | Status | Notes |

@@ -17,6 +17,55 @@ static int check_common_4_3(const n64psp_display_config *config, float scale_x, 
     return 0;
 }
 
+static int check_ui_helpers(n64psp_display_config *config) {
+    float x;
+
+    CHECK(n64psp_display_configure(config, N64PSP_DISPLAY_PSP_320X240));
+    CHECK_CLOSE(n64psp_ui_from_left(config, 79.0f), 79.0f);
+    CHECK_CLOSE(n64psp_ui_from_right(config, 285.0f), 285.0f);
+    CHECK_CLOSE(n64psp_ui_centered(160.0f), 160.0f);
+    CHECK_CLOSE(n64psp_ui_to_framebuffer_x(config, 0.0f), 80.0f);
+    CHECK_CLOSE(n64psp_ui_to_framebuffer_y(config, 0.0f), 16.0f);
+    CHECK_CLOSE(n64psp_ui_to_framebuffer_x(config, 320.0f), 400.0f);
+    CHECK_CLOSE(n64psp_ui_to_framebuffer_y(config, 240.0f), 256.0f);
+
+    CHECK(n64psp_display_configure(config, N64PSP_DISPLAY_PSP_362X272));
+    CHECK_CLOSE(n64psp_ui_to_framebuffer_x(config, 0.0f), 59.0f);
+    CHECK_CLOSE(n64psp_ui_to_framebuffer_y(config, 0.0f), 0.0f);
+    CHECK_CLOSE(n64psp_ui_to_framebuffer_x(config, 320.0f), 421.0f);
+    CHECK_CLOSE(n64psp_ui_to_framebuffer_y(config, 240.0f), 272.0f);
+
+    CHECK(n64psp_display_configure(config, N64PSP_DISPLAY_PSP_480X272));
+    x = n64psp_ui_from_left(config, 79.0f);
+    CHECK_CLOSE(x, 27.2352941f);
+    CHECK_CLOSE(n64psp_ui_to_framebuffer_x(config, x), 89.5333333f);
+    x = n64psp_ui_from_right(config, 285.0f);
+    CHECK_CLOSE(x, 336.7647059f);
+    CHECK_CLOSE(n64psp_ui_to_framebuffer_x(config, x), 440.3333333f);
+    CHECK_CLOSE(n64psp_ui_to_framebuffer_x(config, n64psp_ui_from_left(config, 0.0f)), 0.0f);
+    CHECK_CLOSE(n64psp_ui_to_framebuffer_x(config, n64psp_ui_from_right(config, 320.0f)), 480.0f);
+    CHECK(n64psp_ui_left_edge(config, n64psp_ui_from_left(config, 0.0f)) == 0);
+    CHECK(n64psp_ui_right_edge(config, n64psp_ui_from_right(config, 320.0f)) == 480);
+    CHECK(n64psp_ui_pixel_x(config, 0.0f) == 59);
+    CHECK(n64psp_ui_left_edge(config, 0.0f) == 58);
+    CHECK(n64psp_ui_right_edge(config, 0.0f) == 59);
+    CHECK(n64psp_ui_pixel_y(config, 1.0f) == 1);
+    CHECK(n64psp_ui_top_edge(config, 1.0f) == 1);
+    CHECK(n64psp_ui_bottom_edge(config, 1.0f) == 2);
+
+    CHECK(n64psp_display_configure(config, N64PSP_DISPLAY_TV_720X480_16_9));
+    CHECK_CLOSE(n64psp_ui_to_framebuffer_x(config, n64psp_ui_from_left(config, 0.0f)), 0.0f);
+    CHECK_CLOSE(n64psp_ui_to_framebuffer_x(config, n64psp_ui_from_right(config, 320.0f)), 720.0f);
+    CHECK(n64psp_ui_left_edge(config, n64psp_ui_from_left(config, 0.0f)) == 0);
+    CHECK(n64psp_ui_right_edge(config, n64psp_ui_from_right(config, 320.0f)) == 720);
+    CHECK_CLOSE(n64psp_ui_to_framebuffer_x(config, n64psp_ui_centered(0.0f)), 90.0f);
+    CHECK_CLOSE(n64psp_ui_to_framebuffer_x(config, n64psp_ui_centered(320.0f)), 630.0f);
+    CHECK(n64psp_ui_pixel_x(config, 1.0f) == 92);
+    CHECK(n64psp_ui_left_edge(config, 1.0f) == 91);
+    CHECK(n64psp_ui_right_edge(config, 1.0f) == 92);
+    return 0;
+}
+
 int main(void) {
     n64psp_display_config config;
 
@@ -75,6 +124,7 @@ int main(void) {
 
     CHECK(!n64psp_display_configure(0, N64PSP_DISPLAY_PSP_320X240));
     CHECK(!n64psp_display_configure(&config, (n64psp_display_mode)N64PSP_DISPLAY_MODE_COUNT));
+    CHECK(check_ui_helpers(&config) == 0);
     puts("display tests passed");
     return 0;
 }

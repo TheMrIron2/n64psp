@@ -324,7 +324,7 @@ $(BUILD_HOST)/n64psp_fog_tests: \
 		$(HOST_LDLIBS)
 
 $(BUILD_HOST)/n64psp_display_tests: $(HOST_DISPLAY_TEST_OBJECTS)
-	$(HOST_CC) -o $@ $^
+	$(HOST_CC) -o $@ $^ $(HOST_LDLIBS)
 
 $(BUILD_HOST)/n64psp_host_smoke: $(HOST_SMOKE_OBJECTS)
 	$(HOST_CC) -o $@ $^ $(HOST_LDLIBS)
