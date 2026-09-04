@@ -1,6 +1,6 @@
 # Compatibility
 
-`n64psp/display.h` provides backend-neutral logical, surface, viewport, and projection-aspect policy for original, 4:3, and widescreen presentation modes.
+`n64psp/display.h` provides backend-neutral framebuffer, viewport, display-aspect, pixel-aspect and logical-canvas policy. It describes 320x240, near-4:3 362x272 and full 480x272 PSP LCD modes plus 720x480 4:3 and anamorphic 16:9 TV layouts. TV scanout is not implemented.
 
 ## Runtime APIs
 

@@ -1,73 +1,97 @@
 #include "n64psp/display.h"
 
-static uint32_t n64psp_display_gcd(uint32_t a, uint32_t b) {
-    while (b != 0U) {
-        const uint32_t remainder = a % b;
-        a = b;
-        b = remainder;
+#define N64PSP_DISPLAY_LOGICAL_WIDTH 320.0f
+#define N64PSP_DISPLAY_LOGICAL_HEIGHT 240.0f
+
+typedef struct n64psp_display_mode_description {
+    n64psp_display_output output;
+    uint16_t framebuffer_width;
+    uint16_t framebuffer_height;
+    uint16_t viewport_x;
+    uint16_t viewport_y;
+    uint16_t viewport_width;
+    uint16_t viewport_height;
+    uint16_t ui_viewport_x;
+    uint16_t ui_viewport_y;
+    uint16_t ui_viewport_width;
+    uint16_t ui_viewport_height;
+    float display_aspect;
+    uint8_t anamorphic;
+} n64psp_display_mode_description;
+
+static const n64psp_display_mode_description n64psp_display_modes[N64PSP_DISPLAY_MODE_COUNT] = {
+    {
+        N64PSP_DISPLAY_OUTPUT_PSP_LCD,
+        480, 272,
+        80, 16, 320, 240,
+        80, 16, 320, 240,
+        4.0f / 3.0f,
+        0
+    },
+    {
+        N64PSP_DISPLAY_OUTPUT_PSP_LCD,
+        480, 272,
+        59, 0, 362, 272,
+        59, 0, 362, 272,
+        4.0f / 3.0f,
+        0
+    },
+    {
+        N64PSP_DISPLAY_OUTPUT_PSP_LCD,
+        480, 272,
+        0, 0, 480, 272,
+        59, 0, 362, 272,
+        480.0f / 272.0f,
+        0
+    },
+    {
+        N64PSP_DISPLAY_OUTPUT_TV,
+        720, 480,
+        40, 0, 640, 480,
+        40, 0, 640, 480,
+        4.0f / 3.0f,
+        0
+    },
+    {
+        N64PSP_DISPLAY_OUTPUT_TV,
+        720, 480,
+        0, 0, 720, 480,
+        40, 0, 640, 480,
+        16.0f / 9.0f,
+        1
     }
-    return a;
-}
+};
 
-int n64psp_display_configure(n64psp_display_config *config, n64psp_display_mode mode,
-                             uint16_t logical_width, uint16_t logical_height,
-                             uint16_t surface_width, uint16_t surface_height) {
-    uint32_t width;
-    uint32_t height;
+int n64psp_display_configure(n64psp_display_config *config, n64psp_display_mode mode) {
+    const n64psp_display_mode_description *description;
 
-    if (config == 0 || logical_width == 0 || logical_height == 0 || surface_width == 0 || surface_height == 0 ||
-        mode < N64PSP_DISPLAY_ORIGINAL || mode >= N64PSP_DISPLAY_MODE_COUNT) {
+    if (config == 0 || mode < N64PSP_DISPLAY_PSP_320X240 || mode >= N64PSP_DISPLAY_MODE_COUNT) {
         return 0;
     }
 
-    width = surface_width;
-    height = surface_height;
-    if (mode == N64PSP_DISPLAY_ORIGINAL) {
-        width = logical_width;
-        height = logical_height;
-    } else if (mode == N64PSP_DISPLAY_4_3) {
-        const uint32_t divisor = n64psp_display_gcd(logical_width, logical_height);
-        const uint32_t aspect_width = logical_width / divisor;
-        const uint32_t aspect_height = logical_height / divisor;
-
-        height = surface_height - ((uint32_t)surface_height % aspect_height);
-        width = (height / aspect_height) * aspect_width;
-        if (width > surface_width) {
-            width = surface_width - ((uint32_t)surface_width % aspect_width);
-            height = (width / aspect_width) * aspect_height;
-        }
-    }
-    if (width > surface_width || height > surface_height) {
-        return 0;
-    }
-
+    description = &n64psp_display_modes[mode];
     config->mode = mode;
-    config->logical_width = logical_width;
-    config->logical_height = logical_height;
-    config->surface_width = surface_width;
-    config->surface_height = surface_height;
-    config->viewport_width = (uint16_t)width;
-    config->viewport_height = (uint16_t)height;
-    config->viewport_x = (uint16_t)((surface_width - width) / 2U);
-    config->viewport_y = (uint16_t)((surface_height - height) / 2U);
-    config->ui_viewport_x = config->viewport_x;
-    config->ui_viewport_y = config->viewport_y;
-    config->ui_viewport_width = config->viewport_width;
-    config->ui_viewport_height = config->viewport_height;
-    if (mode == N64PSP_DISPLAY_WIDESCREEN) {
-        const uint32_t divisor = n64psp_display_gcd(logical_width, logical_height);
-        const uint32_t aspect_width = logical_width / divisor;
-        const uint32_t aspect_height = logical_height / divisor;
-        const uint32_t ui_height = surface_height - ((uint32_t)surface_height % aspect_height);
-        const uint32_t ui_width = (ui_height / aspect_height) * aspect_width;
-
-        config->ui_viewport_width = (uint16_t)ui_width;
-        config->ui_viewport_height = (uint16_t)ui_height;
-        config->ui_viewport_x = (uint16_t)((surface_width - ui_width) / 2U);
-        config->ui_viewport_y = (uint16_t)((surface_height - ui_height) / 2U);
-    }
-    config->projection_aspect = mode == N64PSP_DISPLAY_WIDESCREEN
-                                    ? (float)surface_width / (float)surface_height
-                                    : (float)logical_width / (float)logical_height;
+    config->output = description->output;
+    config->framebuffer_width = description->framebuffer_width;
+    config->framebuffer_height = description->framebuffer_height;
+    config->viewport_x = description->viewport_x;
+    config->viewport_y = description->viewport_y;
+    config->viewport_width = description->viewport_width;
+    config->viewport_height = description->viewport_height;
+    config->ui_viewport_x = description->ui_viewport_x;
+    config->ui_viewport_y = description->ui_viewport_y;
+    config->ui_viewport_width = description->ui_viewport_width;
+    config->ui_viewport_height = description->ui_viewport_height;
+    config->display_aspect = description->display_aspect;
+    config->logical_height = N64PSP_DISPLAY_LOGICAL_HEIGHT;
+    config->logical_width = config->logical_height * config->display_aspect;
+    config->scale_x = (float)config->viewport_width / config->logical_width;
+    config->scale_y = (float)config->viewport_height / config->logical_height;
+    config->side_extension = (config->logical_width - N64PSP_DISPLAY_LOGICAL_WIDTH) * 0.5f;
+    config->pixel_aspect = description->anamorphic
+                               ? config->display_aspect /
+                                     ((float)config->framebuffer_width / (float)config->framebuffer_height)
+                               : 1.0f;
+    config->anamorphic = description->anamorphic;
     return 1;
 }

@@ -3,19 +3,30 @@
 
 #include <stdint.h>
 
+typedef enum n64psp_display_output {
+    N64PSP_DISPLAY_OUTPUT_PSP_LCD = 0,
+    N64PSP_DISPLAY_OUTPUT_TV = 1
+} n64psp_display_output;
+
 typedef enum n64psp_display_mode {
-    N64PSP_DISPLAY_ORIGINAL = 0,
-    N64PSP_DISPLAY_4_3 = 1,
-    N64PSP_DISPLAY_WIDESCREEN = 2,
-    N64PSP_DISPLAY_MODE_COUNT = 3
+    N64PSP_DISPLAY_PSP_320X240 = 0,
+    N64PSP_DISPLAY_PSP_362X272 = 1,
+    N64PSP_DISPLAY_PSP_480X272 = 2,
+    N64PSP_DISPLAY_PSP_MODE_COUNT = 3,
+    N64PSP_DISPLAY_TV_720X480_4_3 = 3,
+    N64PSP_DISPLAY_TV_720X480_16_9 = 4,
+    N64PSP_DISPLAY_MODE_COUNT = 5,
+
+    N64PSP_DISPLAY_ORIGINAL = N64PSP_DISPLAY_PSP_320X240,
+    N64PSP_DISPLAY_4_3 = N64PSP_DISPLAY_PSP_362X272,
+    N64PSP_DISPLAY_WIDESCREEN = N64PSP_DISPLAY_PSP_480X272
 } n64psp_display_mode;
 
 typedef struct n64psp_display_config {
     n64psp_display_mode mode;
-    uint16_t logical_width;
-    uint16_t logical_height;
-    uint16_t surface_width;
-    uint16_t surface_height;
+    n64psp_display_output output;
+    uint16_t framebuffer_width;
+    uint16_t framebuffer_height;
     uint16_t viewport_x;
     uint16_t viewport_y;
     uint16_t viewport_width;
@@ -24,11 +35,16 @@ typedef struct n64psp_display_config {
     uint16_t ui_viewport_y;
     uint16_t ui_viewport_width;
     uint16_t ui_viewport_height;
-    float projection_aspect;
+    float display_aspect;
+    float pixel_aspect;
+    float logical_width;
+    float logical_height;
+    float scale_x;
+    float scale_y;
+    float side_extension;
+    uint8_t anamorphic;
 } n64psp_display_config;
 
-int n64psp_display_configure(n64psp_display_config *config, n64psp_display_mode mode,
-                             uint16_t logical_width, uint16_t logical_height,
-                             uint16_t surface_width, uint16_t surface_height);
+int n64psp_display_configure(n64psp_display_config *config, n64psp_display_mode mode);
 
 #endif
