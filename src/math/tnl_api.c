@@ -2,6 +2,8 @@
 
 #include "tnl_internal.h"
 
+#include <string.h>
+
 #if defined(__PSP__)
 #include <stddef.h>
 
@@ -111,6 +113,31 @@ void n64psp_tnl_transform_project_light_packed_batch(
     int has_projection,
     size_t count
 ) {
+    size_t index;
+
+    if (light_count == 0u && count != 0u) {
+        n64psp_vec4f zero_light = {
+            ambient->x,
+            ambient->y,
+            ambient->z,
+            0.0f
+        };
+
+        n64psp_tnl_transform_project_packed_batch(
+            output,
+            matrices,
+            packed_vertices,
+            has_projection,
+            count
+        );
+        for (index = 0u; index < count; ++index) {
+            unsigned char* lighting =
+                (unsigned char*)output->lighting + index * output->lighting_stride;
+            memcpy(lighting, &zero_light, sizeof(zero_light));
+        }
+        return;
+    }
+
 #if defined(__PSP__) && N64PSP_USE_VFPU
     n64psp_tnl_transform_project_light_packed_batch_vfpu(
         output,

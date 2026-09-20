@@ -2,6 +2,7 @@
 
 #include "../../src/math/lighting_internal.h"
 #include "../../src/math/math_internal.h"
+#include "../../src/math/tnl_internal.h"
 
 #include "n64psp/lighting.h"
 #include "n64psp/math.h"
@@ -74,6 +75,7 @@ static lighting_normal_guard lighting_normals_guard;
 static lighting_output_guard lighting_scalar_guard;
 static lighting_output_guard lighting_selected_guard;
 static n64psp_directional_lightf lighting_lights[7];
+static tnl_direct_output tnl_direct_scalar[1];
 static tnl_direct_output tnl_direct_selected[1];
 
 #define lighting_normals lighting_normals_guard.values
@@ -84,14 +86,35 @@ static n64psp_vec4f_pair math_batch_baseline[MATH_BATCH_MAX_COUNT];
 static n64psp_vec4f_pair math_batch_candidate[MATH_BATCH_MAX_COUNT];
 #endif
 
+static int report_projected_direct_case(
+    const char* label,
+    const n64psp_tnl_matrices* matrices,
+    const n64psp_packed_vertex* vertex,
+    const n64psp_directional_lightf* lights,
+    const n64psp_vec4f* ambient,
+    size_t light_count
+);
+
+static int report_projected_direct_transition(
+    const char* label,
+    const n64psp_tnl_matrices* matrices,
+    const n64psp_packed_vertex* vertex,
+    const n64psp_directional_lightf* seed_lights,
+    size_t seed_count,
+    const n64psp_directional_lightf* zero_lights,
+    const n64psp_vec4f* ambient
+);
+
 static int run_tnl_correctness(void) {
     n64psp_tnl_matrices matrices;
     n64psp_packed_vertex vertex;
     n64psp_tnl_output_streams streams;
     n64psp_directional_lightf direct_light;
+    n64psp_directional_lightf seed_lights[7];
     n64psp_vec4f ambient;
     unsigned int column;
     unsigned int row;
+    unsigned int light_index;
 
     memset(&matrices, 0, sizeof(matrices));
     memset(&vertex, 0, sizeof(vertex));
@@ -184,6 +207,114 @@ static int run_tnl_correctness(void) {
     direct_light.color.y = 5.0f;
     direct_light.color.z = 6.0f;
     direct_light.color.w = 0.0f;
+    for (light_index = 0u; light_index < 7u; ++light_index) {
+        seed_lights[light_index] = direct_light;
+        seed_lights[light_index].color.x += (float)light_index;
+        seed_lights[light_index].color.y += (float)light_index;
+        seed_lights[light_index].color.z += (float)light_index;
+    }
+    {
+        int direct_cases_ok = 1;
+
+        vertex.attribute[0] = 127;
+        vertex.attribute[1] = -64;
+        vertex.attribute[2] = 32;
+        matrices.modelview.m[0][0] = 0.03125f;
+        direct_cases_ok &= report_projected_direct_case(
+            "baseline 1-light",
+            &matrices,
+            &vertex,
+            &direct_light,
+            &ambient,
+            1u
+        );
+        direct_cases_ok &= report_projected_direct_case(
+            "baseline 2-light immediate",
+            &matrices,
+            &vertex,
+            seed_lights,
+            &ambient,
+            2u
+        );
+        direct_cases_ok &= report_projected_direct_transition(
+            "1-light -> zero-light NULL",
+            &matrices,
+            &vertex,
+            seed_lights,
+            1u,
+            NULL,
+            &ambient
+        );
+        direct_cases_ok &= report_projected_direct_transition(
+            "1-light -> zero-light non-NULL",
+            &matrices,
+            &vertex,
+            seed_lights,
+            1u,
+            seed_lights,
+            &ambient
+        );
+        direct_cases_ok &= report_projected_direct_case(
+            "baseline 2-light",
+            &matrices,
+            &vertex,
+            seed_lights,
+            &ambient,
+            2u
+        );
+        direct_cases_ok &= report_projected_direct_transition(
+            "2-light -> zero-light NULL",
+            &matrices,
+            &vertex,
+            seed_lights,
+            2u,
+            NULL,
+            &ambient
+        );
+        direct_cases_ok &= report_projected_direct_transition(
+            "2-light -> zero-light non-NULL",
+            &matrices,
+            &vertex,
+            seed_lights,
+            2u,
+            seed_lights,
+            &ambient
+        );
+        direct_cases_ok &= report_projected_direct_case(
+            "baseline 7-light",
+            &matrices,
+            &vertex,
+            seed_lights,
+            &ambient,
+            7u
+        );
+        direct_cases_ok &= report_projected_direct_transition(
+            "7-light -> zero-light NULL",
+            &matrices,
+            &vertex,
+            seed_lights,
+            7u,
+            NULL,
+            &ambient
+        );
+        direct_cases_ok &= report_projected_direct_transition(
+            "7-light -> zero-light non-NULL",
+            &matrices,
+            &vertex,
+            seed_lights,
+            7u,
+            seed_lights,
+            &ambient
+        );
+        matrices.modelview.m[0][0] = 1.0f;
+        if (!direct_cases_ok) {
+            pspDebugScreenPrintf("packed direct lighting failed\n");
+            return 1;
+        }
+    }
+    vertex.attribute[0] = 1;
+    vertex.attribute[1] = 0;
+    vertex.attribute[2] = 0;
     matrices.modelview.m[0][0] = 0.03125f;
     n64psp_tnl_transform_project_light_packed_batch(
         &streams,
@@ -236,10 +367,179 @@ static float absf_local(float value) {
 }
 
 static int nearly_equal(float actual, float expected) {
-    const float difference = absf_local(actual - expected);
-    const float scale = absf_local(expected);
+    const uint32_t actual_bits = float_bits(actual);
+    const uint32_t expected_bits = float_bits(expected);
+    float difference;
+    float scale;
 
+    if (((actual_bits | expected_bits) & UINT32_C(0x7f800000)) == UINT32_C(0x7f800000)) {
+        return 0;
+    }
+
+    difference = absf_local(actual - expected);
+    scale = absf_local(expected);
     return difference <= 1.0e-4f + 1.0e-4f * scale;
+}
+
+static void report_lighting_value(const char* label, const n64psp_vec4f* value) {
+    const uint32_t x_bits = float_bits(value->x);
+    const uint32_t y_bits = float_bits(value->y);
+    const uint32_t z_bits = float_bits(value->z);
+    const uint32_t w_bits = float_bits(value->w);
+    const uint32_t nonfinite_mask = UINT32_C(0x7f800000);
+
+    if (((x_bits | y_bits | z_bits | w_bits) & nonfinite_mask) == nonfinite_mask) {
+        pspDebugScreenPrintf(
+            " %s lighting=nonfinite bits=(%08lx,%08lx,%08lx,%08lx)\n",
+            label,
+            (unsigned long)x_bits,
+            (unsigned long)y_bits,
+            (unsigned long)z_bits,
+            (unsigned long)w_bits
+        );
+        return;
+    }
+
+    pspDebugScreenPrintf(
+        " %s lighting=(%g,%g,%g,%g) bits=(%08lx,%08lx,%08lx,%08lx)\n",
+        label,
+        (double)value->x,
+        (double)value->y,
+        (double)value->z,
+        (double)value->w,
+        (unsigned long)x_bits,
+        (unsigned long)y_bits,
+        (unsigned long)z_bits,
+        (unsigned long)w_bits
+    );
+}
+
+static void setup_projected_direct_streams(
+    n64psp_tnl_output_streams* streams,
+    tnl_direct_output* output,
+    n64psp_vec4f* lighting
+) {
+    streams->view = &output->view;
+    streams->clip = &output->clip;
+    streams->projected = &output->projected[0];
+    streams->lighting = lighting;
+    streams->clip_code = &output->clip_code;
+    streams->valid = &output->valid;
+    streams->vertex_stride = sizeof(*output);
+    streams->lighting_stride = sizeof(*lighting);
+}
+
+static int report_projected_direct_case(
+    const char* label,
+    const n64psp_tnl_matrices* matrices,
+    const n64psp_packed_vertex* vertex,
+    const n64psp_directional_lightf* lights,
+    const n64psp_vec4f* ambient,
+    size_t light_count
+) {
+    n64psp_tnl_output_streams scalar_streams;
+    n64psp_tnl_output_streams selected_streams;
+    n64psp_vec4f* scalar_lighting = &lighting_scalar[0];
+    n64psp_vec4f* selected_lighting = &lighting_selected[0];
+    int lighting_ok;
+    int lighting_exact;
+    int pass;
+
+    setup_projected_direct_streams(
+        &scalar_streams,
+        &tnl_direct_scalar[0],
+        scalar_lighting
+    );
+    setup_projected_direct_streams(
+        &selected_streams,
+        &tnl_direct_selected[0],
+        selected_lighting
+    );
+    n64psp_tnl_transform_project_light_packed_batch_scalar(
+        &scalar_streams,
+        matrices,
+        vertex,
+        lights,
+        ambient,
+        light_count,
+        1,
+        1u
+    );
+    n64psp_tnl_transform_project_light_packed_batch(
+        &selected_streams,
+        matrices,
+        vertex,
+        lights,
+        ambient,
+        light_count,
+        1,
+        1u
+    );
+
+    lighting_ok =
+        nearly_equal(selected_lighting->x, scalar_lighting->x) &&
+        nearly_equal(selected_lighting->y, scalar_lighting->y) &&
+        nearly_equal(selected_lighting->z, scalar_lighting->z) &&
+        nearly_equal(selected_lighting->w, scalar_lighting->w);
+    lighting_exact =
+        float_bits(selected_lighting->x) == float_bits(scalar_lighting->x) &&
+        float_bits(selected_lighting->y) == float_bits(scalar_lighting->y) &&
+        float_bits(selected_lighting->z) == float_bits(scalar_lighting->z) &&
+        float_bits(selected_lighting->w) == float_bits(scalar_lighting->w);
+    pass = lighting_ok &&
+        (tnl_direct_selected[0].clip_code == tnl_direct_scalar[0].clip_code) &&
+        (tnl_direct_selected[0].valid == tnl_direct_scalar[0].valid);
+
+    pspDebugScreenPrintf("%s %s\n", label, pass ? "PASS" : "FAIL");
+    if (!pass) {
+        report_lighting_value("scalar", scalar_lighting);
+        report_lighting_value("vfpu", selected_lighting);
+        pspDebugScreenPrintf(
+            " lighting_compare=%s clip_code=%08lx/%08lx valid=%lu/%lu\n",
+            lighting_exact ? "exact" : lighting_ok ? "tolerance" : "outside-tolerance",
+            (unsigned long)tnl_direct_scalar[0].clip_code,
+            (unsigned long)tnl_direct_selected[0].clip_code,
+            (unsigned long)tnl_direct_scalar[0].valid,
+            (unsigned long)tnl_direct_selected[0].valid
+        );
+    }
+    return pass;
+}
+
+static int report_projected_direct_transition(
+    const char* label,
+    const n64psp_tnl_matrices* matrices,
+    const n64psp_packed_vertex* vertex,
+    const n64psp_directional_lightf* seed_lights,
+    size_t seed_count,
+    const n64psp_directional_lightf* zero_lights,
+    const n64psp_vec4f* ambient
+) {
+    n64psp_tnl_output_streams streams;
+
+    setup_projected_direct_streams(
+        &streams,
+        &tnl_direct_selected[0],
+        &lighting_selected[0]
+    );
+    n64psp_tnl_transform_project_light_packed_batch(
+        &streams,
+        matrices,
+        vertex,
+        seed_lights,
+        ambient,
+        seed_count,
+        1,
+        1u
+    );
+    return report_projected_direct_case(
+        label,
+        matrices,
+        vertex,
+        zero_lights,
+        ambient,
+        0u
+    );
 }
 
 static n64psp_mat4f matrix_from_rows(const float rows[4][4]) {
