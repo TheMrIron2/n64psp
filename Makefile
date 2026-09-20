@@ -112,7 +112,7 @@ PSP_CFLAGS := \
 	-DN64PSP_USE_VFPU=$(N64PSP_USE_VFPU) \
 	-DN64PSP_VFPU_TRANSFORM_EXPERIMENT=$(N64PSP_VFPU_TRANSFORM_EXPERIMENT) \
 	-DN64PSP_GIT_COMMIT=\"$(N64PSP_GIT_COMMIT)\" \
-	-DN64PSP_PSP_OPT_FLAGS=\"$(PSP_OPT_FLAGS)\"
+	'-DN64PSP_PSP_OPT_FLAGS="$(PSP_OPT_FLAGS)"'
 
 PSP_CFLAGS += $(PSP_OPT_FLAGS)
 
@@ -225,7 +225,7 @@ eboot: $(BUILD_PSP)/EBOOT.PBP
 
 $(PSP_COMPILE_FLAGS_STAMP): FORCE
 	@mkdir -p $(@D)
-	@printf '%s\n' '$(PSP_CFLAGS)' > $@.tmp
+	@printf '%s\n' '$(subst ','"'"',$(PSP_CFLAGS))' > $@.tmp
 	@if ! cmp -s $@.tmp $@; then mv $@.tmp $@; else rm -f $@.tmp; fi
 
 $(BUILD_PSP)/%.o: %.c $(PSP_COMPILE_FLAGS_STAMP)
