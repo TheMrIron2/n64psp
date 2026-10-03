@@ -495,8 +495,8 @@ n64psp_tnl_transform_project_light_packed_batch_vfpu:
     mtv         $t9, S300
     mtv         $at, S310
     mtv         $v1, S320
-    vnop
-    vnop
+    addiu       $a2, $a2, 16
+    addu        $a0, $a0, $t4
     vi2f.t      R300, R300, 0
 
     vtfm3.t     R301, M000, R300
@@ -546,8 +546,6 @@ n64psp_tnl_transform_project_light_packed_batch_vfpu:
     vzero.s     S530
     sv.q        R500, 0($t1)
 
-    addiu       $a2, $a2, 16
-    addu        $a0, $a0, $t4
     addu        $a1, $a1, $t4
     addu        $t0, $t0, $t4
     addu        $t1, $t1, $t5
