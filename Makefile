@@ -31,7 +31,8 @@ COMMON_SOURCES := \
 	src/runtime/result.c \
 	src/runtime/runtime.c \
 	src/bridge/bridge.c \
-	src/renderer/trace_backend.c
+	src/renderer/trace_backend.c \
+	src/renderer/native_mesh.c
 
 MATH_SOURCES := \
 	src/math/fog_scalar.c \
@@ -83,7 +84,8 @@ PSP_MATH_OBJECTS := \
 
 PSP_SMOKE_SOURCES := \
 	examples/psp_smoke/main.c \
-	examples/psp_smoke/math_smoke.c
+	examples/psp_smoke/math_smoke.c \
+	examples/psp_smoke/native_mesh_smoke.c
 
 PSP_SMOKE_OBJECTS := \
 	$(patsubst %.c,$(BUILD_PSP)/%.o,$(PSP_SMOKE_SOURCES))
@@ -347,7 +349,7 @@ test-fog: $(BUILD_HOST)/n64psp_fog_tests
 test-tnl: $(BUILD_HOST)/n64psp_tnl_tests
 	./$(BUILD_HOST)/n64psp_tnl_tests
 
-test: test-runtime test-math test-lighting test-fog test-tnl test-display
+test: test-runtime test-math test-lighting test-fog test-tnl test-display test-native-mesh test-link-layout
 
 test-display: $(BUILD_HOST)/n64psp_display_tests
 	./$(BUILD_HOST)/n64psp_display_tests
@@ -391,3 +393,17 @@ clean:
 	$(RM) -r $(BUILD_PSP) $(BUILD_HOST)
 
 distclean: clean
+
+$(BUILD_HOST)/n64psp_native_mesh_tests: $(BUILD_HOST)/tests/test_native_mesh.o $(BUILD_HOST)/src/renderer/native_mesh.o
+	$(HOST_CC) -o $@ $^ $(HOST_LDLIBS)
+
+test-native-mesh: $(BUILD_HOST)/n64psp_native_mesh_tests
+	./$(BUILD_HOST)/n64psp_native_mesh_tests
+
+.PHONY: test-native-mesh
+
+$(BUILD_PSP)/src/renderer/native_mesh.o $(BUILD_HOST)/src/renderer/native_mesh.o $(BUILD_HOST)/tests/test_native_mesh.o $(BUILD_PSP)/examples/psp_smoke/native_mesh_smoke.o: include/n64psp/native_mesh.h
+
+.PHONY: test-link-layout
+test-link-layout:
+	python3 tests/test_link_layout.py

@@ -66,3 +66,14 @@ Trace backend is implemented. It records submitted task metadata and returns `N6
 | Packed vertex transform with lighting | Experimental | PSP hardware validated in SF64 without position or normal staging |
 | Strided packed vertex finalization | Experimental | Scalar tested with PSP VFPU smoke coverage; writes view, clip, projected coordinates, clip code and validity directly |
 | Normal-based texture coordinate generation | Experimental | Scalar tested for spherical and linear N64 mappings |
+
+## Retained geometry experiment
+
+`n64psp/native_mesh.h` provides a F3DEX leaf builder. Command and referenced vertex immutability
+must be qualified separately by the caller.
+The supported subset follows SF64 leaf semantics, so sync/load-block and
+non-render tile commands are ignored.
+The portable `scripts/link_layout.py` tool generates reserved PSP text slots
+from an application-owned JSON plan and checks linked function addresses and
+sizes with `psp-nm`. Slot overflow or changed pinned functions fail the build.
+Application profiling and placement policy remain outside n64psp.

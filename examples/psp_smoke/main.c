@@ -3,6 +3,7 @@
 #include "n64psp/platform.h"
 #include "n64psp/runtime.h"
 #include "math_smoke.h"
+int n64psp_psp_native_mesh_smoke(void);
 #include <pspdebug.h>
 #include <pspdisplay.h>
 #include <pspiofilemgr.h>
@@ -341,6 +342,10 @@ int main(void) {
         n64psp_submit_task(&task, &record) != N64PSP_ERROR_UNSUPPORTED) {
         pspDebugScreenPrintf("bridge/task smoke failed\n");
         return smoke_exit_game(5);
+    }
+    if (n64psp_psp_native_mesh_smoke() != 0) {
+        pspDebugScreenPrintf("native mesh smoke failed\n");
+        return smoke_exit_game(6);
     }
     if (n64psp_psp_math_smoke() != 0) {
         pspDebugScreenPrintf("math smoke failed\n");
