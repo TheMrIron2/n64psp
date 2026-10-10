@@ -73,6 +73,15 @@ Trace backend is implemented. It records submitted task metadata and returns `N6
 must be qualified separately by the caller.
 The supported subset follows SF64 leaf semantics, so sync/load-block and
 non-render tile commands are ignored.
+`n64psp_mesh_packet_pack` copies a built leaf into caller-owned aligned storage,
+merges spans across vertex loads and preserves material order and final slots.
+Packet indices address contiguous span-local vertices; unused loads are omitted.
+Final-only vertices are stored separately from the draw stream. `loaded_count`
+records original loads, while `vertex_count` counts stored vertex copies.
+The packet and its storage must remain live until all consumers finish.
+`n64psp_mesh_outputs_dead` checks bounded caller continuations using qualified
+command effects. Unknown effects, reads before overwrite and exhausted limits
+retain the outputs. The caller must validate referenced data and child contracts.
 The portable `scripts/link_layout.py` tool generates reserved PSP text slots
 from an application-owned JSON plan and checks linked function addresses and
 sizes with `psp-nm`. Slot overflow or changed pinned functions fail the build.
