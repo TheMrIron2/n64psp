@@ -79,6 +79,12 @@ void n64psp_mat4f_transform_vec4(
     const n64psp_vec4f* vector
 );
 
+// Bounds and matrices must be valid and the modelview must be affine
+// Positive minimum W and a relative clip margin preserve conservative admission
+int n64psp_aabb_inside_clip(const float bounds[2][3], const n64psp_mat4f* modelview,
+                          const n64psp_mat4f* projection, float inflation,
+                          float minimum_w, float relative_margin);
+
 /*
  * Transforms each input vector independently through two matrices:
  *

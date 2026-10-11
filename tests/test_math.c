@@ -1082,7 +1082,46 @@ static int test_batch_count_coverage(void) {
     return 0;
 }
 
+static int test_clip_bounds(void) {
+    const float bounds[2][3] = {{-1,-1,-1},{1,1,1}};
+    n64psp_mat4f model = {.m={{1,0,0,0},{0,1,0,0},{0,0,1,0},{0,0,0,1}}};
+    n64psp_mat4f projection = {.m={{0.25f,0,0,0},{0,0.25f,0,0},{0,0,0.25f,0},{0,0,0,1}}};
+    CHECK(n64psp_aabb_inside_clip(bounds,&model,&projection,1,0.001f,0.0005f));
+    CHECK(!n64psp_aabb_inside_clip(bounds,&model,&projection,3,0.001f,0.0005f));
+    for (unsigned axis=0;axis<3;axis++) {
+        projection.m[3][axis]=1;
+        CHECK(!n64psp_aabb_inside_clip(bounds,&model,&projection,1,0.001f,0.0005f));
+        projection.m[3][axis]=-1;
+        CHECK(!n64psp_aabb_inside_clip(bounds,&model,&projection,1,0.001f,0.0005f));
+        projection.m[3][axis]=0;
+    }
+    model.m[0][0]=-1;
+    CHECK(n64psp_aabb_inside_clip(bounds,&model,&projection,1,0.001f,0.0005f));
+    model.m[0][3]=0.01f;
+    CHECK(!n64psp_aabb_inside_clip(bounds,&model,&projection,1,0.001f,0.0005f));
+    model.m[0][3]=0;
+    for (unsigned i=0;i<4;i++) {
+        const float values[]={0,-1,INFINITY,NAN};
+        projection.m[3][3]=values[i];
+        CHECK(!n64psp_aabb_inside_clip(bounds,&model,&projection,1,0.001f,0.0005f));
+    }
+    projection.m[3][3]=1;projection.m[0][0]=NAN;
+    CHECK(!n64psp_aabb_inside_clip(bounds,&model,&projection,1,0.001f,0.0005f));
+    projection.m[0][0]=0.25f;
+    model.m[0][0]=model.m[1][1]=model.m[2][2]=0;
+    projection.m[3][3]=0.001f;
+    CHECK(!n64psp_aabb_inside_clip(bounds,&model,&projection,0,0.001f,0.0005f));
+    projection.m[3][3]=nextafterf(0.001f,INFINITY);
+    CHECK(n64psp_aabb_inside_clip(bounds,&model,&projection,0,0.001f,0.0005f));
+    projection.m[3][3]=1;projection.m[3][0]=1-0.0005f;
+    CHECK(!n64psp_aabb_inside_clip(bounds,&model,&projection,0,0.001f,0.0005f));
+    projection.m[3][0]=nextafterf(1-0.0005f,0);
+    CHECK(n64psp_aabb_inside_clip(bounds,&model,&projection,0,0.001f,0.0005f));
+    return 0;
+}
+
 int main(void) {
+    CHECK(!test_clip_bounds());
     CHECK(test_layout_and_alignment() == 0);
     CHECK(test_sincosf() == 0);
     CHECK(test_matrix_multiply_and_transform() == 0);

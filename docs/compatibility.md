@@ -1,5 +1,22 @@
 # Compatibility
 
+`n64psp_aabb_inside_clip` proves all eight inflated box corners inside one clip
+volume with an affine modelview. It uses separate modelview/projection transforms
+in the existing scalar arithmetic order, requires finite W greater than
+`minimum_w`, and applies `relative_margin * W` to all six clip planes. Pass
+valid bounds/matrices, nonnegative inflation, positive minimum W and a relative
+margin in [0, 1). Non-affine matrices and failed containment return zero. It
+does not cache state or perform allocation. The caller establishes whether one
+projection is sufficient for its rendering semantics.
+
+`n64psp_mesh_compile_spans` folds a qualified packet into ordered geometry spans
+and decoded material deltas with a final zero-count exit record. Allocate
+`span_count + 1` records. Image, tile and size flags identify written fields;
+format and size follow the last image or tile writer. A mirror-change flag
+preserves invalidation when intermediate tile changes return to the initial
+mirror state. The caller owns live texture resolution, backend qualification,
+state invalidation and output-slot contracts. Geometry storage is unchanged.
+
 `n64psp/display.h` provides backend-neutral framebuffer, viewport, display-aspect, pixel-aspect and logical-canvas policy. It describes 320x240, near-4:3 362x272 and full 480x272 PSP LCD modes plus 720x480 4:3 and anamorphic 16:9 TV layouts. TV scanout is not implemented.
 
 The display API also provides semantic left, right and centered UI placement, logical-to-framebuffer mapping and explicit nearest or outward edge snapping.

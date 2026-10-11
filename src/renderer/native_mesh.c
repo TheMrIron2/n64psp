@@ -217,6 +217,58 @@ int n64psp_mesh_packet_pack(n64psp_mesh_packet* packet, void* storage, size_t by
     return 1;
 }
 
+size_t n64psp_mesh_compile_spans(const n64psp_mesh_packet* packet,
+                               n64psp_mesh_span* spans, size_t capacity) {
+    size_t i, count = 0;
+    n64psp_mesh_material material = {0};
+    if (!packet || !packet->valid || !spans || capacity < (size_t) packet->span_count + 1) return 0;
+    for (i = 0; i < packet->action_count; i++) {
+        const n64psp_mesh_action* action = &packet->actions[i];
+        uint32_t w0 = action->w0, w1 = action->w1;
+        if (action->kind == N64PSP_MESH_SPAN) {
+            if (count >= packet->span_count) return 0;
+            spans[count++] = (n64psp_mesh_span) { material, action->first, action->count,
+                                                (uint16_t) action->w0, (uint16_t) action->w1 };
+            memset(&material, 0, sizeof(material));
+        } else if (action->kind == N64PSP_MESH_MATERIAL) {
+            unsigned op = w0 >> 24;
+            if (op == 0xfd) {
+                material.image = w1;
+                material.flags |= N64PSP_MESH_IMAGE;
+            } else if (op == 0xf5) {
+                unsigned cms = (w1 >> 8) & 3, cmt = (w1 >> 18) & 3;
+                unsigned mask_s = (w1 >> 4) & 15, mask_t = (w1 >> 14) & 15;
+                if ((material.flags & N64PSP_MESH_TILE) &&
+                    ((((material.cms & 1) && material.mask_s) != ((cms & 1) && mask_s)) ||
+                     (((material.cmt & 1) && material.mask_t) != ((cmt & 1) && mask_t)))) {
+                    material.flags |= N64PSP_MESH_MIRROR_CHANGED;
+                }
+                material.cms = (uint8_t) cms;
+                material.cmt = (uint8_t) cmt;
+                material.mask_s = (uint8_t) mask_s;
+                material.mask_t = (uint8_t) mask_t;
+                material.palette = (w1 >> 20) & 15;
+                material.shift_s = w1 & 15;
+                material.shift_t = (w1 >> 10) & 15;
+                material.flags |= N64PSP_MESH_TILE;
+            } else if (op == 0xf2) {
+                material.width = (uint16_t) (((w1 >> 12) & 4095) / 4 + 1);
+                material.height = (uint16_t) ((w1 & 4095) / 4 + 1);
+                material.uls = (w0 >> 12) & 4095;
+                material.ult = w0 & 4095;
+                material.flags |= N64PSP_MESH_SIZE;
+            } else return 0;
+            if (op == 0xfd || op == 0xf5) {
+                material.format = (w0 >> 21) & 7;
+                material.size = (w0 >> 19) & 3;
+            }
+        } else return 0;
+    }
+    if (count != packet->span_count) return 0;
+    spans[count++] = (n64psp_mesh_span) { material, 0, 0, 0, 0 };
+    return count;
+}
+
 static int mesh_triangle_reads(uint32_t word, uint32_t slots[2]) {
     unsigned shift;
     for (shift = 0; shift < 24; shift += 8) {

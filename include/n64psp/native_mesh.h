@@ -52,6 +52,24 @@ size_t n64psp_mesh_packet_bytes(const n64psp_mesh* mesh);
 // Storage must be aligned to 16 bytes and remain live while the packet is used
 int n64psp_mesh_packet_pack(n64psp_mesh_packet* packet, void* storage, size_t bytes, const n64psp_mesh* mesh);
 
+enum {
+    N64PSP_MESH_IMAGE = 1, N64PSP_MESH_TILE = 2, N64PSP_MESH_SIZE = 4,
+    N64PSP_MESH_MIRROR_CHANGED = 8
+};
+typedef struct {
+    uint32_t image;
+    uint16_t width, height, uls, ult;
+    uint8_t format, size, palette, cms, cmt, mask_s, mask_t, shift_s, shift_t, flags;
+} n64psp_mesh_material;
+typedef struct {
+    n64psp_mesh_material material;
+    uint16_t first, count, vertex_first, vertex_count;
+} n64psp_mesh_span;
+// Each span carries a material delta and the final zero count record carries exit state
+// Compile into span_count plus one records and retain the packet geometry unchanged
+size_t n64psp_mesh_compile_spans(const n64psp_mesh_packet* packet,
+                               n64psp_mesh_span* spans, size_t capacity);
+
 typedef struct {
     uint32_t reads[2], writes[2];
     unsigned commands;

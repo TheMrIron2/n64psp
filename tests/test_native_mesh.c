@@ -63,7 +63,42 @@ static void test_continuations(void) {
     assert(!n64psp_mesh_command_effect(NULL,&effect));
     assert(!n64psp_mesh_outputs_dead(continuations,0,NULL,100,4,32,effect_resolve,NULL));
 }
+static void test_compiled_materials(void) {
+    n64psp_mesh_action actions[] = {
+        { .kind=N64PSP_MESH_MATERIAL, .w0=0xfd100000, .w1=123 },
+        { .kind=N64PSP_MESH_MATERIAL, .w0=0xf5680000, .w1=0x0028d196 },
+        { .kind=N64PSP_MESH_MATERIAL, .w0=0xf200800c, .w1=0x0007c03c },
+        { .kind=N64PSP_MESH_SPAN, .w0=3, .w1=4, .first=6, .count=9 },
+        { .kind=N64PSP_MESH_MATERIAL, .w0=0xf5680000, .w1=0x00000110 },
+        { .kind=N64PSP_MESH_MATERIAL, .w0=0xf5680000, .w1=0 },
+        { .kind=N64PSP_MESH_MATERIAL, .w0=0xf5680000, .w1=0x00000110 },
+        { .kind=N64PSP_MESH_MATERIAL, .w0=0xfd100000, .w1=456 }
+    };
+    n64psp_mesh_packet input = { .actions=actions, .action_count=8, .span_count=1, .valid=1 };
+    n64psp_mesh_span spans[2];
+    assert(sizeof(n64psp_mesh_material)==24 && sizeof(n64psp_mesh_span)==32);
+    assert(n64psp_mesh_compile_spans(&input,spans,2)==2);
+    assert(spans[0].first==6 && spans[0].count==9 && spans[0].vertex_first==3 && spans[0].vertex_count==4);
+    assert(spans[0].material.image==123 && spans[0].material.format==3 && spans[0].material.size==1);
+    assert(spans[0].material.width==32 && spans[0].material.height==16);
+    assert(spans[0].material.uls==8 && spans[0].material.ult==12);
+    assert(spans[0].material.palette==2 && spans[0].material.cms==1 && spans[0].material.cmt==2);
+    assert(spans[0].material.mask_s==9 && spans[0].material.mask_t==3);
+    assert(spans[0].material.shift_s==6 && spans[0].material.shift_t==4);
+    assert(spans[0].material.flags==7 && !spans[1].count);
+    assert(spans[1].material.image==456 && spans[1].material.format==0 && spans[1].material.size==2);
+    assert(spans[1].material.flags==(N64PSP_MESH_IMAGE|N64PSP_MESH_TILE|N64PSP_MESH_MIRROR_CHANGED));
+    assert(!n64psp_mesh_compile_spans(NULL,spans,2));
+    assert(!n64psp_mesh_compile_spans(&input,NULL,2));
+    assert(!n64psp_mesh_compile_spans(&input,spans,1));
+    input.span_count=0;
+    assert(!n64psp_mesh_compile_spans(&input,spans,2));
+    input.span_count=1; input.action_count=0;
+    assert(!n64psp_mesh_compile_spans(&input,spans,2));
+}
+
 int main(void) {
+    test_compiled_materials();
     test_continuations();
     n64psp_mesh_command words[] = {
         { 0x04000c00, 1 }, { 0xbf000000, 0x00000204 },

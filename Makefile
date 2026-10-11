@@ -35,6 +35,7 @@ COMMON_SOURCES := \
 	src/renderer/native_mesh.c
 
 MATH_SOURCES := \
+	src/math/clip_bounds.c \
 	src/math/fog_scalar.c \
 	src/math/math_api.c \
 	src/math/math_scalar.c \
