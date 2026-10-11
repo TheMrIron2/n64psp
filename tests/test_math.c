@@ -1087,41 +1087,125 @@ static int test_clip_bounds(void) {
     n64psp_mat4f model = {.m={{1,0,0,0},{0,1,0,0},{0,0,1,0},{0,0,0,1}}};
     n64psp_mat4f projection = {.m={{0.25f,0,0,0},{0,0.25f,0,0},{0,0,0.25f,0},{0,0,0,1}}};
     CHECK(n64psp_aabb_inside_clip(bounds,&model,&projection,1,0.001f,0.0005f));
+    CHECK(n64psp_aabb_inside_clip_affine(bounds,&model,&projection,1,0.001f,0.0005f));
     CHECK(!n64psp_aabb_inside_clip(bounds,&model,&projection,3,0.001f,0.0005f));
+    CHECK(!n64psp_aabb_inside_clip_affine(bounds,&model,&projection,3,0.001f,0.0005f));
+    projection.m[0][0]=projection.m[1][1]=projection.m[2][2]=1;
+    projection.m[3][3]=0;
+    projection.m[2][3]=-1;
+    CHECK(!n64psp_aabb_inside_clip(bounds,&model,&projection,0,0.001f,0.0005f));
+    CHECK(n64psp_aabb_inside_clip_affine(bounds,&model,&projection,0,0.001f,0.0005f) ==
+          n64psp_aabb_inside_clip(bounds,&model,&projection,0,0.001f,0.0005f));
+    projection.m[2][3]=1;
+    CHECK(!n64psp_aabb_inside_clip(bounds,&model,&projection,0,0.001f,0.0005f));
+    CHECK(n64psp_aabb_inside_clip_affine(bounds,&model,&projection,0,0.001f,0.0005f) ==
+          n64psp_aabb_inside_clip(bounds,&model,&projection,0,0.001f,0.0005f));
+    projection.m[0][0]=projection.m[1][1]=projection.m[2][2]=0.25f;
+    projection.m[2][3]=0;
+    projection.m[3][3]=1;
     for (unsigned axis=0;axis<3;axis++) {
         projection.m[3][axis]=1;
         CHECK(!n64psp_aabb_inside_clip(bounds,&model,&projection,1,0.001f,0.0005f));
+        CHECK(n64psp_aabb_inside_clip_affine(bounds,&model,&projection,1,0.001f,0.0005f) ==
+              n64psp_aabb_inside_clip(bounds,&model,&projection,1,0.001f,0.0005f));
         projection.m[3][axis]=-1;
         CHECK(!n64psp_aabb_inside_clip(bounds,&model,&projection,1,0.001f,0.0005f));
+        CHECK(n64psp_aabb_inside_clip_affine(bounds,&model,&projection,1,0.001f,0.0005f) ==
+              n64psp_aabb_inside_clip(bounds,&model,&projection,1,0.001f,0.0005f));
         projection.m[3][axis]=0;
     }
     model.m[0][0]=-1;
     CHECK(n64psp_aabb_inside_clip(bounds,&model,&projection,1,0.001f,0.0005f));
     model.m[0][3]=0.01f;
     CHECK(!n64psp_aabb_inside_clip(bounds,&model,&projection,1,0.001f,0.0005f));
+    CHECK(!n64psp_aabb_inside_clip_affine(bounds,&model,&projection,1,0.001f,0.0005f));
     model.m[0][3]=0;
     for (unsigned i=0;i<4;i++) {
         const float values[]={0,-1,INFINITY,NAN};
         projection.m[3][3]=values[i];
         CHECK(!n64psp_aabb_inside_clip(bounds,&model,&projection,1,0.001f,0.0005f));
+        CHECK(n64psp_aabb_inside_clip_affine(bounds,&model,&projection,1,0.001f,0.0005f) ==
+              n64psp_aabb_inside_clip(bounds,&model,&projection,1,0.001f,0.0005f));
     }
     projection.m[3][3]=1;projection.m[0][0]=NAN;
     CHECK(!n64psp_aabb_inside_clip(bounds,&model,&projection,1,0.001f,0.0005f));
+    CHECK(n64psp_aabb_inside_clip_affine(bounds,&model,&projection,1,0.001f,0.0005f) ==
+          n64psp_aabb_inside_clip(bounds,&model,&projection,1,0.001f,0.0005f));
     projection.m[0][0]=0.25f;
     model.m[0][0]=model.m[1][1]=model.m[2][2]=0;
     projection.m[3][3]=0.001f;
     CHECK(!n64psp_aabb_inside_clip(bounds,&model,&projection,0,0.001f,0.0005f));
+    CHECK(n64psp_aabb_inside_clip_affine(bounds,&model,&projection,0,0.001f,0.0005f) ==
+          n64psp_aabb_inside_clip(bounds,&model,&projection,0,0.001f,0.0005f));
     projection.m[3][3]=nextafterf(0.001f,INFINITY);
     CHECK(n64psp_aabb_inside_clip(bounds,&model,&projection,0,0.001f,0.0005f));
+    CHECK(n64psp_aabb_inside_clip_affine(bounds,&model,&projection,0,0.001f,0.0005f));
     projection.m[3][3]=1;projection.m[3][0]=1-0.0005f;
     CHECK(!n64psp_aabb_inside_clip(bounds,&model,&projection,0,0.001f,0.0005f));
+    CHECK(n64psp_aabb_inside_clip_affine(bounds,&model,&projection,0,0.001f,0.0005f) ==
+          n64psp_aabb_inside_clip(bounds,&model,&projection,0,0.001f,0.0005f));
     projection.m[3][0]=nextafterf(1-0.0005f,0);
     CHECK(n64psp_aabb_inside_clip(bounds,&model,&projection,0,0.001f,0.0005f));
+    CHECK(n64psp_aabb_inside_clip_affine(bounds,&model,&projection,0,0.001f,0.0005f));
+    {
+        float exceptionalBounds[2][3]={{-1,-1,-1},{1,1,1}};
+        exceptionalBounds[0][0]=NAN;
+        CHECK(!n64psp_aabb_inside_clip((const float (*)[3]) exceptionalBounds,&model,&projection,0,0.001f,0.0005f));
+        CHECK(n64psp_aabb_inside_clip_affine((const float (*)[3]) exceptionalBounds,&model,&projection,0,0.001f,0.0005f) ==
+              n64psp_aabb_inside_clip((const float (*)[3]) exceptionalBounds,&model,&projection,0,0.001f,0.0005f));
+        exceptionalBounds[0][0]=-INFINITY;
+        CHECK(!n64psp_aabb_inside_clip((const float (*)[3]) exceptionalBounds,&model,&projection,0,0.001f,0.0005f));
+        CHECK(n64psp_aabb_inside_clip_affine((const float (*)[3]) exceptionalBounds,&model,&projection,0,0.001f,0.0005f) ==
+              n64psp_aabb_inside_clip((const float (*)[3]) exceptionalBounds,&model,&projection,0,0.001f,0.0005f));
+        exceptionalBounds[0][0]=-1;
+        exceptionalBounds[1][0]=INFINITY;
+        CHECK(!n64psp_aabb_inside_clip((const float (*)[3]) exceptionalBounds,&model,&projection,0,0.001f,0.0005f));
+        CHECK(n64psp_aabb_inside_clip_affine((const float (*)[3]) exceptionalBounds,&model,&projection,0,0.001f,0.0005f) ==
+              n64psp_aabb_inside_clip((const float (*)[3]) exceptionalBounds,&model,&projection,0,0.001f,0.0005f));
+    }
+    return 0;
+}
+
+static int test_affine_clip_bounds_random(void) {
+    unsigned test;
+    random_state = UINT32_C(0xb07d5afe);
+    for (test = 0; test < 8192; ++test) {
+        float bounds[2][3];
+        n64psp_mat4f model = {{{0}}};
+        n64psp_mat4f projection;
+        unsigned axis, row, column;
+        for (axis = 0; axis < 3; ++axis) {
+            bounds[0][axis] = next_random_float();
+            bounds[1][axis] = bounds[0][axis] + fabsf(next_random_float());
+        }
+        for (row = 0; row < 3; ++row) {
+            for (column = 0; column < 4; ++column) {
+                model.m[column][row] = next_random_float();
+            }
+        }
+        model.m[0][3] = 0;
+        model.m[1][3] = 0;
+        model.m[2][3] = 0;
+        model.m[3][3] = 1;
+        for (row = 0; row < 4; ++row) {
+            for (column = 0; column < 4; ++column) {
+                projection.m[column][row] = next_random_float();
+            }
+        }
+        if (n64psp_aabb_inside_clip((const float (*)[3]) bounds, &model, &projection,
+                                    1.0f, 0.001f, 0.0005f) !=
+            n64psp_aabb_inside_clip_affine((const float (*)[3]) bounds, &model, &projection,
+                                           1.0f, 0.001f, 0.0005f)) {
+            fprintf(stderr, "affine bounds mismatch at case %u\n", test);
+            return 1;
+        }
+    }
     return 0;
 }
 
 int main(void) {
     CHECK(!test_clip_bounds());
+    CHECK(test_affine_clip_bounds_random() == 0);
     CHECK(test_layout_and_alignment() == 0);
     CHECK(test_sincosf() == 0);
     CHECK(test_matrix_multiply_and_transform() == 0);

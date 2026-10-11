@@ -84,6 +84,9 @@ void n64psp_mat4f_transform_vec4(
 int n64psp_aabb_inside_clip(const float bounds[2][3], const n64psp_mat4f* modelview,
                           const n64psp_mat4f* projection, float inflation,
                           float minimum_w, float relative_margin);
+int n64psp_aabb_inside_clip_affine(const float bounds[2][3], const n64psp_mat4f* modelview,
+                                   const n64psp_mat4f* projection, float inflation,
+                                   float minimum_w, float relative_margin);
 
 /*
  * Transforms each input vector independently through two matrices:

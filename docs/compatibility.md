@@ -9,6 +9,13 @@ margin in [0, 1). Non-affine matrices and failed containment return zero. It
 does not cache state or perform allocation. The caller establishes whether one
 projection is sufficient for its rendering semantics.
 
+`n64psp_aabb_inside_clip_affine` is an experimental equivalent for finite
+inflated points. It specializes the accepted affine modelview and the known
+view-space point `w = 1`, while retaining the complete projection W calculation
+and the same containment comparisons. It conservatively rejects nonfinite
+inflated coordinates. It is not promoted until same-binary PSP timing confirms
+a gain.
+
 `n64psp_mesh_compile_spans` folds a qualified packet into ordered geometry spans
 and decoded material deltas with a final zero-count exit record. Allocate
 `span_count + 1` records. Image, tile and size flags identify written fields;

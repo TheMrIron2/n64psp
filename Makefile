@@ -36,6 +36,7 @@ COMMON_SOURCES := \
 
 MATH_SOURCES := \
 	src/math/clip_bounds.c \
+	src/math/clip_bounds_affine.c \
 	src/math/fog_scalar.c \
 	src/math/math_api.c \
 	src/math/math_scalar.c \

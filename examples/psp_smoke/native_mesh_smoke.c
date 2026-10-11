@@ -25,7 +25,9 @@ int n64psp_psp_native_mesh_smoke(void) {
         n64psp_mat4f model={.m={{1,0,0,0},{0,1,0,0},{0,0,1,0},{0,0,0,1}}};
         n64psp_mat4f projection={.m={{0.25f,0,0,0},{0,0.25f,0,0},{0,0,0.25f,0},{0,0,0,1}}};
         if (!n64psp_aabb_inside_clip(bounds,&model,&projection,1,0.001f,0.0005f) ||
-            n64psp_aabb_inside_clip(bounds,&model,&projection,3,0.001f,0.0005f)) return -1;
+            !n64psp_aabb_inside_clip_affine(bounds,&model,&projection,1,0.001f,0.0005f) ||
+            n64psp_aabb_inside_clip(bounds,&model,&projection,3,0.001f,0.0005f) ||
+            n64psp_aabb_inside_clip_affine(bounds,&model,&projection,3,0.001f,0.0005f)) return -1;
     }
     const n64psp_mesh_command words[] = {
         { 0x04000c00, 1 }, { 0xbf000000, 0x00000204 }, { 0xb8000000, 0 }
